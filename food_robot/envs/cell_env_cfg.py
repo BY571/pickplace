@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from dataclasses import MISSING
 from typing import Literal
@@ -24,6 +25,7 @@ from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.configclass import configclass
+from isaaclab_physx.assets import DeformableObjectCfg
 from isaaclab_physx.physics import PhysxCfg
 
 from food_robot.arms import FRANKA_CFG, ArmCfg
@@ -43,7 +45,7 @@ class FoodCellSceneCfg(InteractiveSceneCfg):
     pallet: ArticulationCfg = MISSING
     bowl: RigidObjectCfg = MISSING
     ingredient_bowl: RigidObjectCfg = MISSING
-    food: RigidObjectCfg = MISSING
+    food: RigidObjectCfg | DeformableObjectCfg = MISSING
     belt_visual: AssetBaseCfg | None = None
     wrist_cam: CameraCfg | None = None
     overview_cam: CameraCfg | None = None
@@ -111,7 +113,7 @@ class ObservationsCfg:
     @configclass
     class PrivilegedCfg(ObsGroup):
         food_pos = ObsTerm(func=mdp.asset_pos_cell, params={"asset_cfg": SceneEntityCfg("food")})
-        food_quat = ObsTerm(func=mdp.asset_quat_w, params={"asset_cfg": SceneEntityCfg("food")})
+        # food_quat is contributed by the food plug-in (see FoodSourceCfg.privileged_obs / RigidFoodCfg)
         is_grasped = ObsTerm(func=mdp.is_grasped, params={"robot_cfg": SceneEntityCfg("robot")})
 
         def __post_init__(self):
@@ -133,11 +135,8 @@ class EventCfg:
         params={"position_range": (-0.02, 0.02), "velocity_range": (0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")},
     )
     reset_belt = EventTerm(func=mdp.reset_belt, mode="reset", params={})  # params set by _build_belt_terms
-    reset_food = EventTerm(
-        func=base_mdp.reset_root_state_uniform,
-        mode="reset",
-        params={"pose_range": {}, "velocity_range": {}, "asset_cfg": SceneEntityCfg("food")},
-    )
+    # reset_food is contributed by the food plug-in (see FoodSourceCfg.events / RigidFoodCfg) and merged
+    # in via _build_events(); it is appended after the fields above, so it always runs after reset_all.
 
 
 @configclass
@@ -179,12 +178,21 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.30, 0.0)
     overview_cam_eye: tuple[float, float, float] = (1.3, 0.0, 0.8)
     overview_cam_target: tuple[float, float, float] = (0.45, 0.0, 0.0)
-    # Anti-exploit constraint (spec §5.5): each one-shot term below must exceed the dense shaping
-    # still obtainable in the time remaining, so failing early is never more profitable than trying.
-    # Episodes realistically end when the bowl exits the reach zone: (entry_margin 0.05 + zone_length
-    # 0.40 + max bowl offset 0.03) / slowest belt speed (0.08 * (1 - 0.02)) ~= 6.1 s. Max dense shaping
-    # is the sum of the non-one-shot reward weights (~21/s) * 6.1 s ~= 129. Re-check this arithmetic
-    # whenever belt.speed, belt.speed_noise, belt.place_window or the dense reward weights change.
+    # Anti-exploit constraint (spec §5.5): each one-shot term below must exceed whatever dense shaping
+    # a policy could still earn by deliberately ending the episode early instead of trying, so failing
+    # early is never more profitable than a real attempt. Dense shaping (reach_food, grasp_lift,
+    # transport, transport_fine) is non-negative by construction, so simply ending the episode sooner
+    # never *gains* reward on its own -- the risk is a policy that pays the small per-step
+    # regularization cost (action_rate, joint_vel, bowl_disturbance, ~1e-4-1/s) in exchange for a
+    # one-shot bonus/penalty. Over a normal zone traversal -- (entry_margin 0.05 + zone_length 0.40 +
+    # max bowl offset 0.03) / slowest belt speed (0.08 * (1 - 0.02)) ~= 6.1 s -- the maximum dense
+    # shaping obtainable is the sum of the non-one-shot weights (~21/s) * 6.1 s ~= 129, comfortably
+    # below the 150 bonus/penalty. An arm that instead holds the bowl in place (never triggering
+    # bowl_exited_zone) until time_out can extend that window to episode_length_s ~= 9.0 s, collecting
+    # up to ~21/s * 9.0 s ~= 189 -- more than a single one-shot term, but that policy still forgoes the
+    # 150 success_bonus it could have earned by actually placing the food, so it is not the optimum.
+    # Re-check this arithmetic whenever belt.speed, belt.speed_noise, belt.place_window or the dense
+    # reward weights change.
     success_bonus: float = 150.0
     """Return added once when the food settles in the bowl."""
     bowl_failure_penalty: float = 150.0
@@ -192,8 +200,6 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     food_drop_penalty: float = 150.0
     """Return subtracted once when the food falls off the table."""
     success_settle_steps: int = 5
-    food_spawn_range: float = 0.02
-    """Food spawn xy randomization (± m) around the ingredient bowl center."""
 
     # --- managers ---
     scene: FoodCellSceneCfg = FoodCellSceneCfg(num_envs=64, env_spacing=2.5)
@@ -210,7 +216,10 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics = PhysxCfg(
             bounce_threshold_velocity=0.01,
             gpu_found_lost_aggregate_pairs_capacity=1024 * 1024 * 4,
-            gpu_total_aggregate_pairs_capacity=16 * 1024,
+            # 16*1024 overflowed at num_envs=4096 (measured on the Spark 2026-09-15: PhysX asked for up
+            # to ~16,883 vs. a 16,384 capacity, ~118 "PxgAABBManager.cpp" errors over a 5-iteration PPO
+            # run). Raised to 32*1024 for headroom; see sota-implementations/ppo/README.md.
+            gpu_total_aggregate_pairs_capacity=32 * 1024,
             friction_correlation_distance=0.00625,
         )
         validate_observation_flags(self.cameras, self.privileged_information)
@@ -326,15 +335,17 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
                 open_pos=arm.gripper_open,
                 closed_pos=arm.gripper_closed,
             )
+            # deepcopy: a single food cfg instance (and its term objects) may build multiple envs.
             for name, term in self.food.privileged_obs.items():
-                setattr(obs.privileged, name, term)
+                setattr(obs.privileged, name, copy.deepcopy(term))
         else:
             obs.privileged = None
 
     def _build_events(self) -> None:
         self.events.reset_robot_joints.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=self.arm.arm_joint_names)
+        # deepcopy: a single food cfg instance (and its term objects) may build multiple envs.
         for name, term in self.food.events.items():
-            setattr(self.events, name, term)
+            setattr(self.events, name, copy.deepcopy(term))
 
     def _build_belt_terms(self, zone) -> None:
         belt = self.belt
@@ -369,9 +380,6 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
 
         def grip_params() -> dict:
             return {"robot_cfg": gripper_cfg(), "open_pos": arm.gripper_open, "closed_pos": arm.gripper_closed}
-
-        r = self.food_spawn_range
-        self.events.reset_food.params["pose_range"] = {"x": (-r, r), "y": (-r, r), "z": (0.0, 0.0)}
 
         self.terminations.success.params = {
             "inner_radius": bowl.inner_radius,

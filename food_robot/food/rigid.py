@@ -7,10 +7,12 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import RigidObjectCfg
 from isaaclab.envs import mdp as base_mdp
 from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
 from isaaclab_physx.sim.schemas import CollisionPropertiesCfg, RigidBodyPropertiesCfg
 
+from food_robot.envs.mdp.observations import asset_quat_w
 from food_robot.food.base import FoodSourceCfg
 
 
@@ -23,6 +25,8 @@ class RigidFoodCfg(FoodSourceCfg):
     dynamic_friction_range: tuple[float, float] = (0.2, 0.8)
     restitution_range: tuple[float, float] = (0.0, 0.1)
     mass_scale_range: tuple[float, float] = (0.7, 1.3)
+    spawn_range: float = 0.02
+    """Food spawn xy randomization (± m) around the ingredient bowl center."""
 
     def __post_init__(self):
         self.asset = RigidObjectCfg(
@@ -42,6 +46,7 @@ class RigidFoodCfg(FoodSourceCfg):
             init_state=RigidObjectCfg.InitialStateCfg(),
         )
         # PhysX material/mass randomization uses CPU tensors: apply once at startup (Isaac Lab guidance)
+        r = self.spawn_range
         self.events = {
             "food_material": EventTerm(
                 func=base_mdp.randomize_rigid_body_material,
@@ -64,4 +69,18 @@ class RigidFoodCfg(FoodSourceCfg):
                     "operation": "scale",
                 },
             ),
+            # reset-mode: merged into the env's EventCfg after `reset_all` (setattr on a configclass
+            # appends new fields after existing ones, so this always runs after the scene reset).
+            "reset_food": EventTerm(
+                func=base_mdp.reset_root_state_uniform,
+                mode="reset",
+                params={
+                    "pose_range": {"x": (-r, r), "y": (-r, r), "z": (0.0, 0.0)},
+                    "velocity_range": {},
+                    "asset_cfg": SceneEntityCfg("food"),
+                },
+            ),
+        }
+        self.privileged_obs = {
+            "food_quat": ObsTerm(func=asset_quat_w, params={"asset_cfg": SceneEntityCfg("food")}),
         }

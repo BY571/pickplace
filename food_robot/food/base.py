@@ -19,6 +19,13 @@ class FoodSourceCfg:
     num_items: int = 1
     success_items: int = 1
     events: dict = {}
-    """name -> EventTermCfg merged into the env's EventCfg (use SceneEntityCfg("food"))."""
+    """name -> EventTermCfg merged into the env's EventCfg (use SceneEntityCfg("food")).
+
+    Merged as ``copy.deepcopy(term)`` so a single food cfg instance can build multiple envs
+    without the envs sharing (and mutating) the same term object.
+    """
     privileged_obs: dict = {}
-    """name -> ObservationTermCfg merged into the privileged group when enabled."""
+    """name -> ObservationTermCfg merged into the privileged group when enabled.
+
+    Merged as ``copy.deepcopy(term)``, for the same reason as ``events``.
+    """

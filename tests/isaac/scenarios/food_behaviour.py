@@ -61,7 +61,7 @@ def main():
         success_bonus=cfg.success_bonus,
         food_drop_penalty=cfg.food_drop_penalty,
         food_spawn_offsets=spawn_offsets,
-        food_spawn_range=cfg.food_spawn_range,
+        food_spawn_range=cfg.food.spawn_range,
         reward_terms=sorted(u.reward_manager.active_terms),
     )
 

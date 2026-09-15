@@ -179,11 +179,17 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.30, 0.0)
     overview_cam_eye: tuple[float, float, float] = (1.3, 0.0, 0.8)
     overview_cam_target: tuple[float, float, float] = (0.45, 0.0, 0.0)
+    # Anti-exploit constraint (spec §5.5): each one-shot term below must exceed the dense shaping
+    # still obtainable in the time remaining, so failing early is never more profitable than trying.
+    # Episodes realistically end when the bowl exits the reach zone: (entry_margin 0.05 + zone_length
+    # 0.40 + max bowl offset 0.03) / slowest belt speed (0.08 * (1 - 0.02)) ~= 6.1 s. Max dense shaping
+    # is the sum of the non-one-shot reward weights (~21/s) * 6.1 s ~= 129. Re-check this arithmetic
+    # whenever belt.speed, belt.speed_noise, belt.place_window or the dense reward weights change.
     success_bonus: float = 150.0
     """Return added once when the food settles in the bowl."""
     bowl_failure_penalty: float = 150.0
     """Return subtracted once when the bowl falls off the belt or tips over."""
-    food_drop_penalty: float = 75.0
+    food_drop_penalty: float = 150.0
     """Return subtracted once when the food falls off the table."""
     success_settle_steps: int = 5
     food_spawn_range: float = 0.02

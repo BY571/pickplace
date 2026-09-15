@@ -133,10 +133,25 @@ class EventCfg:
         params={"position_range": (-0.02, 0.02), "velocity_range": (0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")},
     )
     reset_belt = EventTerm(func=mdp.reset_belt, mode="reset", params={})  # params set by _build_belt_terms
+    reset_food = EventTerm(
+        func=base_mdp.reset_root_state_uniform,
+        mode="reset",
+        params={"pose_range": {}, "velocity_range": {}, "asset_cfg": SceneEntityCfg("food")},
+    )
 
 
 @configclass
 class RewardsCfg:
+    reach_food = RewTerm(func=mdp.reach_food, weight=1.0, params={"std": 0.1})
+    grasp_lift = RewTerm(func=mdp.grasp_lift, weight=5.0, params={"lift_height": 0.10})
+    transport = RewTerm(func=mdp.transport_to_bowl, weight=10.0, params={"std": 0.3})
+    transport_fine = RewTerm(func=mdp.transport_to_bowl, weight=5.0, params={"std": 0.05})
+    place_success = RewTerm(func=mdp.termination_indicator, weight=1.0, params={"term_names": ["success"]})
+    bowl_failure = RewTerm(
+        func=mdp.termination_indicator, weight=-1.0, params={"term_names": ["bowl_off_belt", "bowl_tipped"]}
+    )
+    food_dropped = RewTerm(func=mdp.termination_indicator, weight=-1.0, params={"term_names": ["food_off_table"]})
+    bowl_disturbance = RewTerm(func=mdp.bowl_disturbance, weight=-1.0)
     action_rate = RewTerm(func=base_mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=base_mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
 
@@ -147,6 +162,8 @@ class TerminationsCfg:
     bowl_exited_zone = DoneTerm(func=mdp.bowl_exited_zone, params={})
     bowl_off_belt = DoneTerm(func=mdp.bowl_off_belt, params={})
     bowl_tipped = DoneTerm(func=mdp.bowl_tipped, params={"max_tilt_rad": math.radians(45.0)})
+    success = DoneTerm(func=mdp.food_in_bowl, params={})
+    food_off_table = DoneTerm(func=mdp.food_off_table, params={"minimum_height": -0.05})
 
 
 @configclass
@@ -162,6 +179,15 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.30, 0.0)
     overview_cam_eye: tuple[float, float, float] = (1.3, 0.0, 0.8)
     overview_cam_target: tuple[float, float, float] = (0.45, 0.0, 0.0)
+    success_bonus: float = 150.0
+    """Return added once when the food settles in the bowl."""
+    bowl_failure_penalty: float = 150.0
+    """Return subtracted once when the bowl falls off the belt or tips over."""
+    food_drop_penalty: float = 75.0
+    """Return subtracted once when the food falls off the table."""
+    success_settle_steps: int = 5
+    food_spawn_range: float = 0.02
+    """Food spawn xy randomization (± m) around the ingredient bowl center."""
 
     # --- managers ---
     scene: FoodCellSceneCfg = FoodCellSceneCfg(num_envs=64, env_spacing=2.5)
@@ -199,6 +225,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self._build_observations()
         self._build_events()
         self._build_belt_terms(zone)
+        self._build_food_terms()
 
     # ------------------------------------------------------------------
     def _build_scene(self, zone) -> None:
@@ -322,3 +349,37 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             "belt_half_width": belt.belt_half_width,
             "surface_z": belt.plate_top_z,
         }
+
+    def _build_food_terms(self) -> None:
+        arm, bowl = self.arm, self.belt.bowl
+        step_dt = self.sim.dt * self.decimation
+
+        # NOTE: a fresh SceneEntityCfg is built for every term's params (never shared) because
+        # Isaac Lab resolves joint_ids in place; sharing one instance across manager term params
+        # causes "Both 'joint_names' and 'joint_ids' are specified, and are not consistent." (see
+        # _build_observations above and task-4-report.md).
+        def gripper_cfg() -> SceneEntityCfg:
+            return SceneEntityCfg("robot", joint_names=arm.gripper_joint_names)
+
+        def grip_params() -> dict:
+            return {"robot_cfg": gripper_cfg(), "open_pos": arm.gripper_open, "closed_pos": arm.gripper_closed}
+
+        r = self.food_spawn_range
+        self.events.reset_food.params["pose_range"] = {"x": (-r, r), "y": (-r, r), "z": (0.0, 0.0)}
+
+        self.terminations.success.params = {
+            "inner_radius": bowl.inner_radius,
+            "base_thickness": bowl.base_thickness,
+            "rim_height": bowl.wall_height,
+            "item_radius": self.food.item_radius,
+            "settle_steps": self.success_settle_steps,
+            **grip_params(),
+        }
+        hover = bowl.base_thickness + bowl.wall_height + self.food.item_radius + 0.03
+        self.rewards.grasp_lift.params.update(grip_params())
+        self.rewards.transport.params.update(hover_height=hover, **grip_params())
+        self.rewards.transport_fine.params.update(hover_height=hover, **grip_params())
+        # one-shot terms: undo Isaac Lab's step_dt scaling so the return changes by exactly the bonus/penalty
+        self.rewards.place_success.weight = self.success_bonus / step_dt
+        self.rewards.bowl_failure.weight = -self.bowl_failure_penalty / step_dt
+        self.rewards.food_dropped.weight = -self.food_drop_penalty / step_dt

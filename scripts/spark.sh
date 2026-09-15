@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Syncs the laptop working tree to the DGX Spark and runs a command there
-# inside the project venv, with the aarch64 Isaac Lab preloads set up.
+# Syncs the laptop working tree to the DGX Spark and runs a command there.
+# By default the command runs inside the food-robot Docker image
+# (docker/run.sh), which handles all aarch64 / Isaac Sim quirks. Pass a
+# leading --host to run the command directly on the Spark host instead
+# (e.g. to build the image itself).
 #
-# Usage: ./scripts/spark.sh <command> [args...]
+# Usage: ./scripts/spark.sh [--host] <command> [args...]
 # Env overrides: SPARK_HOST (default: spark), SPARK_DIR (default: ~/food-robot)
 #
 # Note: args are embedded (shell-quoted via printf %q) into the heredoc sent
@@ -15,6 +18,12 @@ SPARK_HOST="${SPARK_HOST:-spark}"
 SPARK_DIR="${SPARK_DIR:-~/food-robot}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+HOST_MODE=0
+if [[ "${1:-}" == "--host" ]]; then
+  HOST_MODE=1
+  shift
+fi
+
 rsync -az --delete \
   --exclude .git --exclude .venv --exclude third_party --exclude .superpowers \
   --exclude outputs --exclude multirun --exclude checkpoints \
@@ -23,23 +32,11 @@ rsync -az --delete \
 
 printf -v CMD '%q ' "$@"
 
+RUN_PREFIX=""
+[[ "$HOST_MODE" -eq 1 ]] || RUN_PREFIX="./docker/run.sh "
+
 ssh "$SPARK_HOST" bash -s <<EOF
 set -euo pipefail
 cd $SPARK_DIR
-export OMNI_KIT_ACCEPT_EULA=YES ACCEPT_EULA=Y PRIVACY_CONSENT=Y
-export PATH="\$HOME/.local/bin:\$PATH"
-if [[ -f .venv/bin/activate ]]; then
-  # shellcheck disable=SC1091
-  source .venv/bin/activate
-  export LD_PRELOAD="/lib/aarch64-linux-gnu/libgomp.so.1"
-  CARB_SO="\$(python3 -c "import sys, glob
-for p in sys.path:
-    hits = glob.glob(p + '/omni/client/libcarb.so')
-    if hits:
-        print(hits[0]); break")"
-  if [[ -n "\$CARB_SO" ]]; then
-    export LD_PRELOAD="\$LD_PRELOAD:\$CARB_SO"
-  fi
-fi
-exec $CMD
+exec ${RUN_PREFIX}$CMD
 EOF

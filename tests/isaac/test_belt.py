@@ -25,5 +25,8 @@ def test_speed_noise_and_bowl_offset_randomization(run_scenario):
     assert all(nominal * (1 - noise) - 1e-3 <= s <= nominal * (1 + noise) + 1e-3 for s in speeds)
     assert max(speeds) - min(speeds) > 0.2 * nominal * noise  # actually randomized
     offsets = r["bowl_offset_x"]
-    assert all(-0.03 - 5e-3 <= o <= 0.03 + 5e-3 for o in offsets)
-    assert max(offsets) - min(offsets) > 0.02
+    assert all(-0.02 - 5e-3 <= o <= 0.02 + 5e-3 for o in offsets)
+    assert max(offsets) - min(offsets) > 0.015
+    starts = r["pallet_start"]
+    assert all(-0.08 - 1e-4 <= s <= 0.08 + 1e-4 for s in starts)
+    assert max(starts) - min(starts) > 0.08

@@ -13,6 +13,7 @@ from isaaclab.utils.configclass import configclass
 from isaaclab_physx.sim.schemas import CollisionPropertiesCfg, RigidBodyPropertiesCfg
 
 from food_robot.envs.mdp.observations import asset_quat_w
+from food_robot.envs.mdp.events import reset_food_in_bowl
 from food_robot.food.base import FoodSourceCfg
 
 
@@ -26,7 +27,7 @@ class RigidFoodCfg(FoodSourceCfg):
     restitution_range: tuple[float, float] = (0.0, 0.1)
     mass_scale_range: tuple[float, float] = (0.7, 1.3)
     spawn_range: float = 0.02
-    """Food spawn xy randomization (± m) around the ingredient bowl center."""
+    """Food spawn xy randomization (± m) around the ingredient bowl's position in this reset."""
 
     def __post_init__(self):
         self.asset = RigidObjectCfg(
@@ -46,7 +47,6 @@ class RigidFoodCfg(FoodSourceCfg):
             init_state=RigidObjectCfg.InitialStateCfg(),
         )
         # PhysX material/mass randomization uses CPU tensors: apply once at startup (Isaac Lab guidance)
-        r = self.spawn_range
         self.events = {
             "food_material": EventTerm(
                 func=base_mdp.randomize_rigid_body_material,
@@ -69,15 +69,16 @@ class RigidFoodCfg(FoodSourceCfg):
                     "operation": "scale",
                 },
             ),
-            # reset-mode: merged into the env's EventCfg after `reset_all` (setattr on a configclass
-            # appends new fields after existing ones, so this always runs after the scene reset).
+            # reset-mode: merged into the env's EventCfg after `reset_ingredient_bowl` (setattr on a configclass
+            # appends new fields after existing ones). height_above_bowl is filled in by the env, which knows
+            # the bowl geometry.
             "reset_food": EventTerm(
-                func=base_mdp.reset_root_state_uniform,
+                func=reset_food_in_bowl,
                 mode="reset",
                 params={
-                    "pose_range": {"x": (-r, r), "y": (-r, r), "z": (0.0, 0.0)},
-                    "velocity_range": {},
-                    "asset_cfg": SceneEntityCfg("food"),
+                    "spawn_range": self.spawn_range,
+                    "height_above_bowl": 0.0,
+                    "food_cfg": SceneEntityCfg("food"),
                 },
             ),
         }

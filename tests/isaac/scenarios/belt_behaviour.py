@@ -30,7 +30,7 @@ def make(belt: BeltCfg, num_envs: int):
 
 
 def events():
-    belt = BeltCfg(speed_noise=0.0, bowl_offset_x=(0.0, 0.0), bowl_offset_y=(0.0, 0.0))
+    belt = BeltCfg(speed_noise=0.0, bowl_offset_x=(0.0, 0.0), bowl_offset_y=(0.0, 0.0), pallet_start_range=(0.0, 0.0))
     env, cfg = make(belt, 4)
     u = env.unwrapped
     bowl, dt, device = u.scene["bowl"], u.step_dt, u.device
@@ -66,7 +66,7 @@ def events():
 
 
 def randomization():
-    belt = BeltCfg(speed_noise=0.1, bowl_offset_x=(-0.03, 0.03), bowl_offset_y=(-0.02, 0.02))
+    belt = BeltCfg(speed_noise=0.1, pallet_start_range=(-0.08, 0.08), bowl_offset_x=(-0.02, 0.02), bowl_offset_y=(-0.04, 0.04))
     env, cfg = make(belt, 16)
     u = env.unwrapped
     action = torch.zeros(16, u.action_manager.total_action_dim, device=u.device)
@@ -81,6 +81,7 @@ def randomization():
         speed=cfg.belt.speed,
         speed_noise=cfg.belt.speed_noise,
         bowl_offset_x=term.offset[:, 0].tolist(),
+        pallet_start=term.start.tolist(),
     )
 
 

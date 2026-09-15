@@ -20,6 +20,8 @@ env:
   # food_drop_penalty: 150.0        # return subtracted once when the food falls off the table
   # success_settle_steps: 5
   # ingredient_bowl_pos: [0.45, -0.10, 0.0]
+  # ingredient_bowl_x_range: [0.35, 0.55]
+  # ingredient_bowl_y_range: [-0.20, 0.00]
   # overview_cam_eye: [1.5, 0.1, 1.0]
   # overview_cam_target: [0.3, 0.1, 0.3]
 

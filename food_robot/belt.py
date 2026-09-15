@@ -12,8 +12,8 @@ from food_robot.timing import BeltZone, belt_zone
 class BeltCfg:
     speed: float = 0.08
     """Nominal line speed [m/s]."""
-    speed_noise: float = 0.02
-    """Per-episode relative speed noise: speed * (1 + U(-noise, noise))."""
+    speed_noise: float = 0.0
+    """Per-episode relative speed noise: speed * (1 + U(-noise, noise)). The line runs at a fixed speed."""
     place_window: float = 5.0
     """Seconds the bowl spends inside the reach zone at nominal speed. Zone length = speed * place_window."""
     zone_center_x: float = 0.45
@@ -21,10 +21,13 @@ class BeltCfg:
     belt_half_width: float = 0.15
     entry_margin: float = 0.05
     """The bowl spawns this far before the zone entry."""
-    bowl_offset_x: tuple[float, float] = (-0.03, 0.03)
-    """Reset randomization of the bowl position on the pallet along the belt (shifts the timing)."""
-    bowl_offset_y: tuple[float, float] = (-0.02, 0.02)
+    bowl_offset_x: tuple[float, float] = (-0.02, 0.02)
+    """Reset randomization of the bowl position on the pallet along the belt."""
+    bowl_offset_y: tuple[float, float] = (-0.04, 0.04)
     """Reset randomization across the belt."""
+    pallet_start_range: tuple[float, float] = (-0.08, 0.08)
+    """Pallet joint position at reset [m] (0 = belt entry). Shifts when the bowl arrives: at 0.08 m/s the
+    time until the bowl leaves the zone spans ~6.9 s (earliest) to ~4.4 s (latest)."""
     plate_top_z: float = 0.03
     """Height of the pallet top surface above the table."""
     pallet: PalletGeometry = PalletGeometry()

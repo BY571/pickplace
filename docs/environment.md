@@ -29,7 +29,7 @@ tipped or knocked off.
 
 | Phase | What happens |
 |---|---|
-| Reset | robot joints ± 0.02 rad; food spawns in the ingredient bowl (± `food.spawn_range`, via the food plug-in's `reset_food` event); pallet at the belt entry; belt speed = `speed · (1 + U(±speed_noise))`; bowl offset on the pallet sampled from `bowl_offset_x/y` |
+| Reset | robot joints ± 0.02 rad; ingredient bowl placed at a random position in `ingredient_bowl_x_range` × `ingredient_bowl_y_range`; food spawns inside it (± `food.spawn_range`); pallet starts at a random joint position in `belt.pallet_start_range`; belt speed = `speed · (1 + U(±speed_noise))` (noise 0 by default); bowl offset on the pallet sampled from `bowl_offset_x/y` |
 | Running | bowl moves through the zone; the arm has ≈ `place_window` seconds |
 | End | first termination below |
 
@@ -40,7 +40,7 @@ tipped or knocked off.
 | `bowl_off_belt` | terminated | bowl below the pallet surface − 2 cm, or beyond the belt half-width |
 | `bowl_tipped` | terminated | bowl tilted more than 45° |
 | `food_off_table` | terminated | food below z = −5 cm |
-| `time_out` | truncated | safety cap: `(entry_margin + zone_length + 0.1) / (speed · (1 − speed_noise)) + 2 s` |
+| `time_out` | truncated | safety cap: `(entry_margin − pallet_start_range[0] − bowl_offset_x[0] + zone_length + 0.1) / (speed · (1 − speed_noise)) + 2 s` |
 
 The zone exit is *terminated*, not truncated: the deadline is part of the task and the bowl position is
 observed, so value targets must not bootstrap past it. `time_out` is a generous upper bound (the slowest
@@ -142,8 +142,8 @@ changes by exactly the configured bonus/penalty.
 
 Each one-shot penalty/bonus is deliberately large enough that ending an episode early is never more
 profitable than a real attempt: dense shaping is non-negative, so early-ending never *gains* reward by
-itself, and the maximum dense shaping obtainable over a realistic zone traversal (≈ 129) or even by
-holding the bowl until `time_out` (≈ 189) does not exceed the 150 bonus/penalty by enough to make failing
+itself, and the maximum dense shaping obtainable over a realistic zone traversal (≈ 145) or even by
+holding the bowl until `time_out` (≈ 212) does not exceed the 150 bonus/penalty by enough to make failing
 worthwhile once the one-shot term's sign is accounted for. `food_robot/envs/cell_env_cfg.py` documents the
 full anti-exploit argument next to the three constants, and asks you to re-check it whenever `belt.speed`,
 `belt.speed_noise`, `belt.place_window` or the dense reward weights change.
@@ -159,6 +159,9 @@ Configure through constructor kwargs, e.g.
 `FoodCellEnvCfg(cameras=False, privileged_information=True, belt=BeltCfg(speed=0.1))`, or through the
 `env:` section of an algorithm's Hydra config.
 
+The randomization ranges used for the first pixel PPO run are drawn to scale in
+![DR ranges](media/ppo_pixels_run1_dr_ranges.png).
+
 ### `FoodCellEnvCfg`
 
 | Parameter | Default | Description |
@@ -170,7 +173,8 @@ Configure through constructor kwargs, e.g.
 | `cameras` | `True` | spawn wrist + overview cameras and add the `pixels` group |
 | `image_size` | `(128, 128)` | camera height, width |
 | `privileged_information` | `False` | add the simulation-only `privileged` group |
-| `ingredient_bowl_pos` | `(0.45, -0.10, 0.0)` | ingredient bowl position, cell frame |
+| `ingredient_bowl_pos` | `(0.45, -0.10, 0.0)` | nominal ingredient bowl position (spawn pose; z is used at every reset) |
+| `ingredient_bowl_x_range` / `ingredient_bowl_y_range` | `(0.35, 0.55)` / `(-0.20, 0.00)` | reset randomization of the ingredient bowl position (cell frame); validated against arm reach and belt clearance |
 | `overview_cam_eye` / `overview_cam_target` | `(1.5, 0.1, 1.0)` / `(0.3, 0.1, 0.3)` | overview camera placement: in front of the table facing the robot head-on, centered between the ingredient bowl and the belt |
 | `render_camera` | `False` | spawn `scene.render_cam`, a wide third-person camera for videos; not an observation, so the TorchRL specs don't change (the app must be launched with cameras enabled) |
 | `render_cam_eye` / `render_cam_target` | `(2.3, -1.9, 1.9)` / `(0.3, 0.0, 0.35)` | render camera placement (whole cell in view) |
@@ -186,18 +190,19 @@ Configure through constructor kwargs, e.g.
 | Parameter | Default | Description |
 |---|---|---|
 | `speed` | `0.08` m/s | nominal line speed |
-| `speed_noise` | `0.02` | per-episode relative noise: `speed · (1 + U(±noise))` |
+| `speed_noise` | `0.0` | per-episode relative noise: `speed · (1 + U(±noise))` |
 | `place_window` | `5.0` s | time the bowl spends in the reach zone at nominal speed |
 | `zone_center_x` | `0.45` m | zone center along the belt; zone length = `speed · place_window` |
 | `belt_y` | `0.30` m | belt centerline |
 | `belt_half_width` | `0.15` m | lateral limit for `bowl_off_belt` |
 | `entry_margin` | `0.05` m | bowl spawns this far before the zone |
-| `bowl_offset_x` | `(-0.03, 0.03)` m | reset randomization along the belt (shifts the timing) |
-| `bowl_offset_y` | `(-0.02, 0.02)` m | reset randomization across the belt |
+| `bowl_offset_x` | `(-0.02, 0.02)` m | reset randomization along the belt |
+| `bowl_offset_y` | `(-0.04, 0.04)` m | reset randomization across the belt |
+| `pallet_start_range` | `(-0.08, 0.08)` m | pallet joint position at reset (0 = belt entry); shifts when the bowl arrives: ~6.9 s (earliest) to ~4.4 s (latest) until it leaves the zone at 0.08 m/s |
 | `plate_top_z` | `0.03` m | pallet surface height |
 | `pallet_damping` | `1e4` | velocity-drive gain of the pallet joint |
 | `bowl` | `BowlGeometry()` | inner radius 7 cm, wall 5 cm, mass 0.2 kg |
-| `pallet` | `PalletGeometry()` | size `(0.22, 0.22, 0.01)` m, mass 2.0 kg, `travel_lower=-0.05`, `travel_upper=1.0` m — the prismatic joint's travel range along the belt. `travel_upper` must be ≥ `zone.length + entry_margin + 0.1` (the env raises `ValueError` otherwise), so the pallet can never run out of travel before the safety-cap `time_out`. |
+| `pallet` | `PalletGeometry()` | size `(0.22, 0.26, 0.01)` m, mass 2.0 kg, `travel_lower=-0.12`, `travel_upper=1.0` m — the prismatic joint's travel range along the belt; `travel_lower` must be ≤ `pallet_start_range[0]`. `travel_upper` must be ≥ `zone.length + entry_margin + 0.1` (the env raises `ValueError` otherwise), so the pallet can never run out of travel before the safety-cap `time_out`. |
 
 The env raises `ValueError` if the zone endpoints are outside `arm.reach_radius`.
 

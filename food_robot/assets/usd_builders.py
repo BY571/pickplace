@@ -36,9 +36,11 @@ class BowlGeometry:
 class PalletGeometry:
     """Fixed base + plate on a prismatic joint ``slider`` along +x."""
 
-    size: tuple[float, float, float] = (0.22, 0.22, 0.01)
+    size: tuple[float, float, float] = (0.22, 0.26, 0.01)
+    """Along the belt, across the belt, thickness [m]. 0.26 m wide so the bowl fits at +-4 cm lateral offset."""
     mass: float = 2.0
-    travel_lower: float = -0.05
+    travel_lower: float = -0.12
+    """Joint lower limit [m]; must allow the earliest pallet start (BeltCfg.pallet_start_range[0])."""
     travel_upper: float = 1.0
     color: tuple[float, float, float] = (0.25, 0.25, 0.25)
 

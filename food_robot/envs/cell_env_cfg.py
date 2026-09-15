@@ -33,7 +33,14 @@ from food_robot.assets.scene_assets import make_bowl_cfg, make_pallet_cfg
 from food_robot.belt import BeltCfg
 from food_robot.envs import mdp
 from food_robot.food import FoodSourceCfg, RigidFoodCfg
-from food_robot.timing import look_at_quat_xyzw, validate_observation_flags, validate_zone_reachable
+from food_robot.timing import (
+    look_at_quat_xyzw,
+    validate_bowl_on_pallet,
+    validate_observation_flags,
+    validate_pallet_start,
+    validate_supply_bowl_range,
+    validate_zone_reachable,
+)
 
 ActionMode = Literal["ee_delta_pose", "joint_pos"]
 
@@ -144,8 +151,10 @@ class EventCfg:
         params={"position_range": (-0.02, 0.02), "velocity_range": (0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")},
     )
     reset_belt = EventTerm(func=mdp.reset_belt, mode="reset", params={})  # params set by _build_belt_terms
+    reset_ingredient_bowl = EventTerm(func=mdp.reset_ingredient_bowl, mode="reset", params={})  # params set by _build_food_terms
     # reset_food is contributed by the food plug-in (see FoodSourceCfg.events / RigidFoodCfg) and merged
-    # in via _build_events(); it is appended after the fields above, so it always runs after reset_all.
+    # in via _build_events(); it is appended after the fields above, so it always runs after reset_all and
+    # reset_ingredient_bowl.
 
 
 @configclass
@@ -185,6 +194,10 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     image_size: tuple[int, int] = (128, 128)
     privileged_information: bool = False
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.10, 0.0)
+    ingredient_bowl_x_range: tuple[float, float] = (0.35, 0.55)
+    """Reset randomization of the ingredient bowl's x position (cell frame). A single value fixes it."""
+    ingredient_bowl_y_range: tuple[float, float] = (-0.20, 0.00)
+    """Reset randomization of the ingredient bowl's y position (cell frame)."""
     overview_cam_eye: tuple[float, float, float] = (1.5, 0.1, 1.0)
     overview_cam_target: tuple[float, float, float] = (0.3, 0.1, 0.3)
     render_camera: bool = False
@@ -199,12 +212,12 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     # transport, transport_fine) is non-negative by construction, so simply ending the episode sooner
     # never *gains* reward on its own -- the risk is a policy that pays the small per-step
     # regularization cost (action_rate, joint_vel, bowl_disturbance, ~1e-4-1/s) in exchange for a
-    # one-shot bonus/penalty. Over a normal zone traversal -- (entry_margin 0.05 + zone_length 0.40 +
-    # max bowl offset 0.03) / slowest belt speed (0.08 * (1 - 0.02)) ~= 6.1 s -- the maximum dense
-    # shaping obtainable is the sum of the non-one-shot weights (~21/s) * 6.1 s ~= 129, comfortably
+    # one-shot bonus/penalty. Over a normal zone traversal -- (entry_margin 0.05 + earliest pallet start
+    # 0.08 + max bowl offset 0.02 + zone_length 0.40) / belt speed 0.08 ~= 6.9 s -- the maximum dense
+    # shaping obtainable is the sum of the non-one-shot weights (~21/s) * 6.9 s ~= 145, comfortably
     # below the 150 bonus/penalty. An arm that instead holds the bowl in place (never triggering
-    # bowl_exited_zone) until time_out can extend that window to episode_length_s ~= 9.0 s, collecting
-    # up to ~21/s * 9.0 s ~= 189 -- more than a single one-shot term, but that policy still forgoes the
+    # bowl_exited_zone) until time_out can extend that window to episode_length_s ~= 10.1 s, collecting
+    # up to ~21/s * 10.1 s ~= 212 -- more than a single one-shot term, but that policy still forgoes the
     # 150 success_bonus it could have earned by actually placing the food, so it is not the optimum.
     # Re-check this arithmetic whenever belt.speed, belt.speed_noise, belt.place_window or the dense
     # reward weights change.
@@ -244,11 +257,25 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             raise NotImplementedError("Only num_items=1 is implemented in sub-project 1.")
         zone = self.belt.zone()
         validate_zone_reachable(zone, self.belt.belt_y, (0.0, 0.0), self.arm.reach_radius)
-        if self.belt.pallet.travel_upper < zone.length + self.belt.entry_margin + 0.1:
-            raise ValueError("belt.pallet.travel_upper is too short for the belt zone; increase it.")
-        slowest = self.belt.speed * (1.0 - self.belt.speed_noise)
-        # safety cap only: the bowl leaves the zone (a terminated failure) well before this
-        self.episode_length_s = (self.belt.entry_margin + zone.length + 0.1) / slowest + 2.0
+        belt, bowl_outer_radius = self.belt, self.belt.bowl.inner_radius + self.belt.bowl.wall_thickness
+        validate_pallet_start(
+            belt.pallet_start_range, belt.pallet.travel_lower, belt.pallet.travel_upper, zone.length, belt.entry_margin
+        )
+        validate_bowl_on_pallet(
+            belt.pallet.size[:2], bowl_outer_radius, belt.bowl_offset_x, belt.bowl_offset_y, belt.belt_half_width
+        )
+        validate_supply_bowl_range(
+            self.ingredient_bowl_x_range,
+            self.ingredient_bowl_y_range,
+            bowl_outer_radius,
+            self.arm.reach_radius,
+            belt.belt_y,
+            belt.belt_half_width,
+        )
+        slowest = belt.speed * (1.0 - belt.speed_noise)
+        # safety cap only: from the earliest possible start the bowl leaves the zone (a terminated failure) before this
+        longest_path = belt.entry_margin - belt.pallet_start_range[0] - belt.bowl_offset_x[0] + zone.length + 0.1
+        self.episode_length_s = longest_path / slowest + 2.0
 
         self._build_scene(zone)
         self._build_actions()
@@ -383,6 +410,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self.events.reset_belt.params = {
             "speed": belt.speed,
             "speed_noise": belt.speed_noise,
+            "pallet_start_range": belt.pallet_start_range,
             "bowl_offset_x": belt.bowl_offset_x,
             "bowl_offset_y": belt.bowl_offset_y,
             "entry_x": belt.entry_x(),
@@ -401,6 +429,14 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     def _build_food_terms(self) -> None:
         arm, bowl = self.arm, self.belt.bowl
         step_dt = self.sim.dt * self.decimation
+        self.events.reset_ingredient_bowl.params = {
+            "x_range": self.ingredient_bowl_x_range,
+            "y_range": self.ingredient_bowl_y_range,
+            "z": self.ingredient_bowl_pos[2],
+            "bowl_cfg": SceneEntityCfg("ingredient_bowl"),
+        }
+        if hasattr(self.events, "reset_food"):
+            self.events.reset_food.params["height_above_bowl"] = bowl.base_thickness + self.food.item_radius + 0.005
 
         # NOTE: a fresh SceneEntityCfg is built for every term's params (never shared) because
         # Isaac Lab resolves joint_ids in place; sharing one instance across manager term params

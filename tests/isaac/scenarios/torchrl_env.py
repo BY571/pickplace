@@ -65,7 +65,7 @@ def specs():
 
 
 def partial_reset():
-    belt = {"speed_noise": 0.0, "bowl_offset_x": [0.0, 0.0], "bowl_offset_y": [0.0, 0.0]}
+    belt = {"speed_noise": 0.0, "bowl_offset_x": [0.0, 0.0], "bowl_offset_y": [0.0, 0.0], "pallet_start_range": [0.0, 0.0]}
     env = make_env({**ENV, "belt": belt})
     cfg = build_cell_env_cfg({**ENV, "belt": belt})
     td = env.reset()

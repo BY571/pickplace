@@ -26,7 +26,8 @@ def main():
     device, dt = u.device, u.step_dt
     food, bowl = u.scene["food"], u.scene["bowl"]
 
-    spawn_offsets = (obs["privileged"]["food_pos"][:, :2] - torch.tensor(cfg.ingredient_bowl_pos[:2], device=device)).tolist()
+    supply_xy = u.scene["ingredient_bowl"].data.root_pos_w.torch[:, :2] - u.scene.env_origins[:, :2]
+    spawn_offsets = (obs["privileged"]["food_pos"][:, :2] - supply_xy).tolist()
 
     action = torch.zeros(N, u.action_manager.total_action_dim, device=device)
     action[:, -1] = 1.0  # binary gripper: positive = open

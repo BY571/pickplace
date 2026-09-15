@@ -9,7 +9,7 @@ import sys
 from omegaconf import OmegaConf
 
 cli = OmegaConf.from_dotlist(sys.argv[1:])
-env_cfg = OmegaConf.to_container(cli.get("env", {}), resolve=True)
+env_cfg = OmegaConf.to_container(cli.env, resolve=True) if "env" in cli else {}
 
 from food_robot.app import launch_app  # noqa: E402
 

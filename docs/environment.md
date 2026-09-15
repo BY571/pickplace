@@ -72,6 +72,15 @@ All groups are nested (`concatenate_terms=False`), so TorchRL keys look like `("
 | | | `last_action` | 7 / 8 | previous action |
 | `belt` | always | `bowl_pos` | 3 | bowl position, cell frame |
 | `pixels` | `cameras=True` | `wrist_rgb`, `overview_rgb` | H×W×3 | camera images from the `image_float` term: float32, values in [0, 255] (not normalized) |
+| `privileged` | `privileged_information=True` | `food_pos` | 3 | food position, cell frame (simulation only) |
+| | | `food_quat` | 4 | food orientation (simulation only) |
+| | | `is_grasped` | 1 | 1.0 if the food is held (simulation only) |
+
+`cameras=False` together with `privileged_information=False` is rejected: no observation would tell the
+policy where the food is. Privileged terms are never available on a real robot — use them for critics,
+teachers or debugging, not for deployable actors.
+
+Belt speed is intentionally not observed: the line runs at a fixed speed.
 
 #### Camera memory budget
 
@@ -99,15 +108,6 @@ reasonable starting range with both default cameras at 128×128 is `num_envs` in
 uses at `num_envs=4096`. `sota-implementations/ppo/ppo.py` also drops the `"next"` sub-tensordict before
 it reaches the replay buffer (`ClipPPOLoss` only needs root observations, action, log-prob, advantage
 and value_target), which roughly halves the buffered camera memory versus the naive formula above.
-| `privileged` | `privileged_information=True` | `food_pos` | 3 | food position, cell frame (simulation only) |
-| | | `food_quat` | 4 | food orientation (simulation only) |
-| | | `is_grasped` | 1 | 1.0 if the food is held (simulation only) |
-
-`cameras=False` together with `privileged_information=False` is rejected: no observation would tell the
-policy where the food is. Privileged terms are never available on a real robot — use them for critics,
-teachers or debugging, not for deployable actors.
-
-Belt speed is intentionally not observed: the line runs at a fixed speed.
 
 ## Actions
 

@@ -23,6 +23,11 @@ def image_float(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg, data_type: str
     reject the mismatch between the declared float32 spec and the real uint8 tensor (verified on the
     Spark: ``AssertionError: ... Got fake=torch.float32 and real=torch.uint8``). Cast here instead of
     relaxing the spec, per deviation #2 in the plan overview.
+
+    Memory note: a float32 RGB buffer is 4x the size of the native uint8 RGB buffer the camera
+    sensor produces (4 bytes/channel vs. 1), and TorchRL stores one copy per transition at both the
+    root and "next" keys. See ``docs/environment.md`` for the per-frame memory formula and
+    recommended ``num_envs`` ranges when training with cameras on the Spark.
     """
     from isaaclab.envs import mdp as base_mdp
 

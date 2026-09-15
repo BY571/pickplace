@@ -27,6 +27,11 @@ directly on the server instead (e.g. to build the image):
 
 ### Local (bare uv)
 
+**Untested in this repo.** Development and all verification (unit tests, simulator tests, the PPO
+scale run) happened exclusively on the DGX Spark through Docker; `scripts/setup_env.sh` and the
+steps below have never been exercised end-to-end here. Treat this path as a starting point, not a
+verified install.
+
 Requires an NVIDIA GPU with >= 16 GB VRAM recommended. On aarch64 this also
 needs the apt packages Isaac Lab's arm64 build depends on:
 
@@ -36,6 +41,13 @@ Then:
 
     OMNI_KIT_ACCEPT_EULA=YES ./scripts/setup_env.sh
     source .venv/bin/activate
+
+**aarch64 note:** Isaac Sim's bundled OpenMP/carb libraries must be preloaded before Python starts on
+aarch64, per the Isaac Lab docs, or extension loading fails with unresolved-symbol errors:
+
+    export LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1:<venv site-packages>/omni/client/libcarb.so
+
+(`<venv site-packages>` is typically `.venv/lib/python3.12/site-packages`.)
 
 See `docs/environment.md` for the environment and its parameters.
 
@@ -50,9 +62,16 @@ Prints the TorchRL spec tree, runs `check_env_specs` and a short random rollout:
 
     cd sota-implementations/ppo && python ppo.py env.num_envs=4096
 
-From a laptop: `./scripts/spark.sh python sota-implementations/ppo/ppo.py env.num_envs=4096`. See
-[`sota-implementations/ppo/README.md`](sota-implementations/ppo/README.md) for observation routing and how
-to play a trained checkpoint.
+From a laptop: `./scripts/spark.sh python sota-implementations/ppo/ppo.py env.num_envs=4096`. This runs
+attached to your terminal (the ssh session must stay open). For a long run, start it detached instead:
+
+    ./scripts/spark.sh --detach python sota-implementations/ppo/ppo.py env.num_envs=4096 logger.backend=wandb
+
+`--detach` rsyncs the repo, then starts the command in a named, detached container
+(`food-robot-<timestamp>`) on the Spark and returns immediately, printing the container name plus the
+commands to follow its logs (`ssh spark docker logs -f <name>`) and stop it (`ssh spark docker stop
+<name>`). See [`sota-implementations/ppo/README.md`](sota-implementations/ppo/README.md) for observation
+routing and how to play a trained checkpoint.
 
 ## Tests
 

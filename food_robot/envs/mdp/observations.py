@@ -13,6 +13,22 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
+def image_float(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg, data_type: str = "rgb") -> torch.Tensor:
+    """Raw (unnormalized) camera image cast to float32; values stay in [0, 255] for rgb.
+
+    Isaac Lab's ``ManagerBasedRLEnv`` builds every observation term's gym space as
+    ``gym.spaces.Box(..., dtype=np.float32)`` regardless of the term's actual output dtype
+    (``manager_based_rl_env.py``). The stock ``isaaclab.envs.mdp.image(normalize=False)`` returns
+    the camera sensor's native dtype (``uint8`` for rgb), which makes TorchRL's ``check_env_specs``
+    reject the mismatch between the declared float32 spec and the real uint8 tensor (verified on the
+    Spark: ``AssertionError: ... Got fake=torch.float32 and real=torch.uint8``). Cast here instead of
+    relaxing the spec, per deviation #2 in the plan overview.
+    """
+    from isaaclab.envs import mdp as base_mdp
+
+    return base_mdp.image(env, sensor_cfg=sensor_cfg, data_type=data_type, normalize=False).float()
+
+
 def asset_pos_cell(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     return env.scene[asset_cfg.name].data.root_pos_w.torch - env.scene.env_origins
 

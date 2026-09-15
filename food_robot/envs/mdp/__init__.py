@@ -7,6 +7,7 @@ from food_robot.envs.mdp.observations import (
     ee_quat_w,
     grasped_mask,
     gripper_pos,
+    image_float,
     is_grasped,
 )
 from food_robot.envs.mdp.events import reset_belt

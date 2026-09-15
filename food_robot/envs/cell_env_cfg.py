@@ -96,12 +96,12 @@ class ObservationsCfg:
     @configclass
     class PixelsCfg(ObsGroup):
         wrist_rgb = ObsTerm(
-            func=base_mdp.image,
-            params={"sensor_cfg": SceneEntityCfg("wrist_cam"), "data_type": "rgb", "normalize": False},
+            func=mdp.image_float,
+            params={"sensor_cfg": SceneEntityCfg("wrist_cam"), "data_type": "rgb"},
         )
         overview_rgb = ObsTerm(
-            func=base_mdp.image,
-            params={"sensor_cfg": SceneEntityCfg("overview_cam"), "data_type": "rgb", "normalize": False},
+            func=mdp.image_float,
+            params={"sensor_cfg": SceneEntityCfg("overview_cam"), "data_type": "rgb"},
         )
 
         def __post_init__(self):

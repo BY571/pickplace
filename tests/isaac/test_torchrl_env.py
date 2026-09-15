@@ -16,7 +16,13 @@ def test_specs_rollout_and_stats(run_scenario, cameras, privileged):
     assert (["pixels", "wrist_rgb"] in r["leaf_keys"]) == bool(cameras)
     assert (["privileged", "food_pos"] in r["leaf_keys"]) == bool(privileged)
     assert set(r["termination_stats"]) == TERMS
-    assert r["config_errors"] == {"unknown_key": "ValueError", "unknown_arm": "KeyError"}
+    assert r["config_errors"] == {
+        "unknown_key": "ValueError",
+        "unknown_arm": "KeyError",
+        "unknown_reward": "KeyError",
+        "one_shot_reward": "KeyError",
+    }
+    assert r["belt_pallet_travel_upper"] == pytest.approx(2.0)
 
 
 def test_partial_reset_only_resets_masked_env(run_scenario):

@@ -22,13 +22,25 @@ ENV = {"num_envs": 4, "cameras": CAMERAS, "privileged_information": PRIVILEGED}
 
 def config_errors():
     out = {}
-    for name, bad in {"unknown_key": {"bogus": 1}, "unknown_arm": {"arm": "nope"}}.items():
+    cases = {
+        "unknown_key": {"bogus": 1},
+        "unknown_arm": {"arm": "nope"},
+        "unknown_reward": {"rewards": {"bogus_term": 1.0}},
+        "one_shot_reward": {"rewards": {"place_success": 5.0}},
+    }
+    for name, bad in cases.items():
         try:
             build_cell_env_cfg({**ENV, **bad})
             out[name] = "no error"
         except Exception as exc:  # noqa: BLE001
             out[name] = type(exc).__name__
     return out
+
+
+def belt_pallet_override() -> float:
+    """A nested belt.pallet override must actually reach the PalletGeometry the scene builds with."""
+    cfg = build_cell_env_cfg({**ENV, "belt": {"pallet": {"travel_upper": 2.0}}})
+    return cfg.belt.pallet.travel_upper
 
 
 def specs():
@@ -48,6 +60,7 @@ def specs():
         actor_keys=actor_keys,
         termination_stats=termination_stats(env),
         config_errors=errors,
+        belt_pallet_travel_upper=belt_pallet_override(),
     )
 
 

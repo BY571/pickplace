@@ -8,9 +8,20 @@ env:
   cameras: false
   image_size: [128, 128]
   privileged_information: true
-  belt: {}          # e.g. {speed: 0.1, place_window: 4.0}
+  belt: {}          # e.g. {speed: 0.1, place_window: 4.0, pallet: {travel_upper: 2.0}, bowl: {mass: 0.3}}
+  rewards: {}       # e.g. {reach_food: 2.0, bowl_disturbance: -2.0} -- one-shot terms (place_success,
+                     # bowl_failure, food_dropped) go through success_bonus/bowl_failure_penalty/
+                     # food_drop_penalty below instead, and raise KeyError if put here.
+  food_params: {}   # e.g. {spawn_range: 0.03, mass: 0.04} -- forwarded to the food plug-in constructor
   seed: 0
   device: cuda:0
+  # success_bonus: 150.0            # return added once on success
+  # bowl_failure_penalty: 150.0     # return subtracted once when the bowl fails
+  # food_drop_penalty: 150.0        # return subtracted once when the food falls off the table
+  # success_settle_steps: 5
+  # ingredient_bowl_pos: [0.45, -0.30, 0.0]
+  # overview_cam_eye: [1.3, 0.0, 0.8]
+  # overview_cam_target: [0.45, 0.0, 0.0]
 
 app:
   headless: true

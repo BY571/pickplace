@@ -1,0 +1,9 @@
+.git
+third_party
+.venv
+.superpowers
+outputs
+multirun
+checkpoints
+__pycache__
+.pytest_cache

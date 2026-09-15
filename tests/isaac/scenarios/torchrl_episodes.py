@@ -16,7 +16,8 @@ import torch  # noqa: E402
 from torchrl.modules import MLP, ValueOperator  # noqa: E402
 from torchrl.objectives.value.advantages import GAE  # noqa: E402
 
-from food_robot.torchrl_env import make_env  # noqa: E402
+from food_robot.metrics import OUTCOME_TERMS  # noqa: E402
+from food_robot.torchrl_env import make_env, reward_term_stats, termination_stats  # noqa: E402
 
 NUM_ENVS = 4
 NUM_STEPS = 600
@@ -46,7 +47,7 @@ def main():
         "num_envs": NUM_ENVS,
         "cameras": False,
         "privileged_information": True,
-        "belt": {"speed": 0.3, "place_window": 0.6},
+        "belt": {"speed": 0.3, "place_window": 0.6, "pallet_start_range": [0.0, 0.0]},
     }
     env = make_env(env_cfg)
     device = env.device
@@ -103,6 +104,18 @@ def main():
         nan_rows = torch.isnan(obs_next).any(dim=-1)
         nan_only_on_done[".".join(key)] = bool((nan_rows == done).all())
 
+    # Episode outcomes: flags only on done rows, at least one per done row, and the last episode of every env
+    # agrees with Isaac Lab's own last-episode termination stats.
+    outcomes = {t: td["next", "outcome", t].squeeze(-1) for t in OUTCOME_TERMS}
+    outcome_only_on_done = all(bool((flags & ~done).sum() == 0) for flags in outcomes.values())
+    any_outcome = torch.stack(list(outcomes.values())).any(dim=0)
+    every_done_has_outcome = bool((any_outcome[done]).all())
+    last_done_idx = (done.float() * torch.arange(done.shape[1], device=done.device)).argmax(dim=1)
+    rows = torch.arange(done.shape[0], device=done.device)
+    last_episode_rates = {t: float(flags[rows, last_done_idx].float().mean()) for t, flags in outcomes.items()}
+    stats = termination_stats(env)
+    outcome_counts = {t: int(flags.sum()) for t, flags in outcomes.items()}
+
     finish(
         True,
         n_done=n_done,
@@ -114,6 +127,12 @@ def main():
         episode_reward_nan_only_on_done=episode_reward_nan_only_on_done,
         after_done_reward_matches=after_done_reward_matches,
         nan_only_on_done=nan_only_on_done,
+        outcome_only_on_done=outcome_only_on_done,
+        every_done_has_outcome=every_done_has_outcome,
+        last_episode_rates=last_episode_rates,
+        termination_stats=stats,
+        outcome_counts=outcome_counts,
+        reward_terms=sorted(reward_term_stats(env)),
     )
 
 

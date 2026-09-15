@@ -5,6 +5,7 @@ import sys
 from _common import finish
 
 MODE, CAMERAS, PRIVILEGED = sys.argv[1], bool(int(sys.argv[2])), bool(int(sys.argv[3]))
+FRAME_STACK = int(sys.argv[4]) if len(sys.argv) > 4 else 1
 
 from food_robot.app import launch_app  # noqa: E402
 
@@ -17,7 +18,7 @@ from food_robot.config import build_cell_env_cfg  # noqa: E402
 from food_robot.keys import expand_in_keys  # noqa: E402
 from food_robot.torchrl_env import make_env, termination_stats  # noqa: E402
 
-ENV = {"num_envs": 4, "cameras": CAMERAS, "privileged_information": PRIVILEGED}
+ENV = {"num_envs": 4, "cameras": CAMERAS, "privileged_information": PRIVILEGED, "frame_stack": FRAME_STACK}
 
 
 def config_errors():
@@ -61,6 +62,8 @@ def specs():
         termination_stats=termination_stats(env),
         config_errors=errors,
         belt_pallet_travel_upper=belt_pallet_override(),
+        wrist_shape=list(env.observation_spec["pixels", "wrist_rgb"].shape) if CAMERAS else None,
+        outcome_dtype=str(td["next", "outcome", "success"].dtype),
     )
 
 

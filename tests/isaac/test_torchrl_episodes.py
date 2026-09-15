@@ -26,3 +26,12 @@ def test_episode_boundaries_at_torchrl_level(run_scenario):
     # NaNs in ("next", <obs>) appear only on done rows, for every observation group checked.
     for key, ok in r["nan_only_on_done"].items():
         assert ok, f"NaN pattern for {key} does not line up exactly with done rows"
+
+    # Episode outcome transform
+    assert r["outcome_only_on_done"]
+    assert r["every_done_has_outcome"]
+    for term, rate in r["last_episode_rates"].items():
+        assert rate == pytest.approx(r["termination_stats"][term], abs=1e-6), term
+    assert r["outcome_counts"]["bowl_exited_zone"] > 0  # zero actions: the bowl rides out of the zone
+    assert r["outcome_counts"]["success"] == 0
+    assert {"reach_food", "grasp_lift", "transport"} <= set(r["reward_terms"])

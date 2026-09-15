@@ -281,6 +281,14 @@ print(td["next", "proprio", "ee_pos"].shape)   # (16, 10, 3)
 Route observations to model parts with `food_robot.keys.expand_in_keys(env.observation_spec, ["proprio", "belt"])`.
 Inspect the spec tree: `python scripts/check_env.py env.cameras=false env.privileged_information=true`.
 
+### Episode outcome
+
+`make_env` adds an `EpisodeOutcome` transform. On a done row, `("next", "outcome", <term>)` is True for the
+termination term(s) that ended the episode (`success`, `bowl_exited_zone`, `bowl_off_belt`, `bowl_tipped`,
+`food_off_table`, `time_out`); it is False everywhere else. The success rate of a batch is therefore
+`outcome.success[done].float().mean()` (see `food_robot.metrics.outcome_rates`), exact per finished episode,
+unlike `termination_stats`, which only reflects each env's most recent episode.
+
 ## Training
 
 See `sota-implementations/ppo/README.md`. Camera-trained checkpoints (`env.cameras=true`) must also be

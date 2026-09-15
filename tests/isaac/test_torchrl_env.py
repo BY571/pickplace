@@ -5,9 +5,9 @@ pytestmark = pytest.mark.isaac
 TERMS = {"time_out", "bowl_exited_zone", "bowl_off_belt", "bowl_tipped", "success", "food_off_table"}
 
 
-@pytest.mark.parametrize("cameras,privileged", [(0, 1), (1, 1)])
-def test_specs_rollout_and_stats(run_scenario, cameras, privileged):
-    r = run_scenario("torchrl_env", "specs", cameras, privileged)
+@pytest.mark.parametrize("cameras,privileged,frame_stack", [(0, 1, 1), (1, 1, 1), (1, 0, 3)])
+def test_specs_rollout_and_stats(run_scenario, cameras, privileged, frame_stack):
+    r = run_scenario("torchrl_env", "specs", cameras, privileged, frame_stack)
     assert r["check_env_specs"] == "ok"
     assert r["batch_size"] == [4]
     assert r["rollout_ee_pos_shape"] == [4, 20, 3]
@@ -23,6 +23,10 @@ def test_specs_rollout_and_stats(run_scenario, cameras, privileged):
         "one_shot_reward": "KeyError",
     }
     assert r["belt_pallet_travel_upper"] == pytest.approx(2.0)
+    assert ["outcome", "success"] in r["leaf_keys"] and ["outcome", "time_out"] in r["leaf_keys"]
+    assert r["outcome_dtype"] == "torch.bool"
+    if cameras:
+        assert r["wrist_shape"] == [4, 128, 128, 3 * frame_stack]
 
 
 def test_partial_reset_only_resets_masked_env(run_scenario):

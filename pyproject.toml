@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+train = ["wandb>=0.19", "moviepy>=2", "seaborn>=0.13", "matplotlib>=3.8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["food_robot"]

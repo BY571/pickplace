@@ -50,6 +50,11 @@ RUN "${ISAACLAB_PATH}/isaaclab.sh" -p -m pip install --no-deps \
 import torch, torchrl, tensordict, isaaclab_assets, isaaclab_physx; \
 print(f'torch={torch.__version__} cuda={torch.cuda.is_available()} torchrl={torchrl.__version__} tensordict={tensordict.__version__}')"
 
+# Experiment logging and plots: W&B (video logging needs moviepy) and seaborn/matplotlib for result figures.
+# A separate layer so the Isaac Lab / TorchRL layers above stay cached.
+RUN "${ISAACLAB_PATH}/isaaclab.sh" -p -m pip install \
+      "wandb>=0.19" "moviepy>=2" "seaborn>=0.13" "matplotlib>=3.8"
+
 # Copy just pyproject.toml + food_robot/ (not the whole repo) so a runtime
 # bind-mount of the repo root at /workspace/food-robot takes effect without
 # invalidating this layer on every code edit.

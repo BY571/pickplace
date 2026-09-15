@@ -27,6 +27,14 @@ The container runs as the non-root `isaaclab` user and keeps the Isaac Sim / Isa
 USD assets in named volumes (`docker/volumes.sh`). If a volume ever becomes unwritable, repair it with
 `./docker/fix-volume-permissions.sh` (`build.sh` runs it automatically).
 
+**Weights & Biases.** Training scripts log to W&B when `logger.backend=wandb`. On a server, put the API key in
+`~/.netrc` (mode 600) — `docker/run.sh` mounts it read-only into the container — or export `WANDB_API_KEY`
+before calling `docker/run.sh`:
+
+    machine api.wandb.ai
+      login user
+      password <your-api-key>
+
 </details>
 
 <details>

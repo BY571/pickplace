@@ -12,6 +12,8 @@
 #                      returns. Combine with DOCKER_NAME to name it (see
 #                      scripts/spark.sh --detach, which sets both).
 #   DOCKER_NAME=<name> container name; only meaningful with DOCKER_DETACH=1.
+#   WANDB_API_KEY / WANDB_MODE  forwarded into the container when set on the host.
+#   ~/.netrc                    mounted read-only at /root/.netrc when present (W&B credentials).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -39,10 +41,21 @@ for spec in "${FOOD_ROBOT_VOLUMES[@]}"; do
   VOLUME_FLAGS+=(-v "$spec")
 done
 
+WANDB_FLAGS=()
+for var in WANDB_API_KEY WANDB_MODE; do
+  if [[ -n "${!var:-}" ]]; then
+    WANDB_FLAGS+=(-e "$var")
+  fi
+done
+if [[ -f "$HOME/.netrc" ]]; then
+  WANDB_FLAGS+=(-v "$HOME/.netrc:/root/.netrc:ro")
+fi
+
 exec docker run "${RUN_FLAGS[@]}" \
   --gpus all --network host --ipc=host \
   -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y -e OMNI_KIT_ACCEPT_EULA=YES -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v "$ROOT":/workspace/food-robot \
   "${VOLUME_FLAGS[@]}" \
+  "${WANDB_FLAGS[@]}" \
   -w /workspace/food-robot \
   "$IMAGE" "$@"

@@ -32,5 +32,5 @@ if [[ ! -d third_party/IsaacLab ]]; then
 fi
 (cd third_party/IsaacLab && ./isaaclab.sh --install assets,physx)
 
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,train]"
 python scripts/verify_install.py

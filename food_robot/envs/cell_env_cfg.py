@@ -185,8 +185,8 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     image_size: tuple[int, int] = (128, 128)
     privileged_information: bool = False
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.10, 0.0)
-    overview_cam_eye: tuple[float, float, float] = (1.6, -0.4, 1.4)
-    overview_cam_target: tuple[float, float, float] = (0.35, 0.0, 0.25)
+    overview_cam_eye: tuple[float, float, float] = (1.5, 0.1, 1.0)
+    overview_cam_target: tuple[float, float, float] = (0.3, 0.1, 0.3)
     render_camera: bool = False
     """Spawn ``scene.render_cam``, a wide view of the whole cell for videos. It is not an observation, so it
     does not change the TorchRL specs; the app must be launched with cameras enabled."""

@@ -51,7 +51,19 @@ def main(cfg: DictConfig):
     env = make_env(OmegaConf.to_container(cfg.env, resolve=True))
     num_envs = env.batch_size[0]
     frames_per_batch = num_envs * cfg.collector.rollout_steps
-    total_iterations = cfg.max_iterations or cfg.collector.total_frames // frames_per_batch
+    if cfg.max_iterations:
+        total_iterations = int(cfg.max_iterations)
+    else:
+        if cfg.collector.total_frames < frames_per_batch:
+            raise ValueError(
+                f"collector.total_frames ({cfg.collector.total_frames}) is smaller than frames_per_batch "
+                f"({frames_per_batch} = env.num_envs [{num_envs}] * collector.rollout_steps "
+                f"[{cfg.collector.rollout_steps}]), so no iteration would run. Set max_iterations "
+                "explicitly or increase collector.total_frames."
+            )
+        total_iterations = cfg.collector.total_frames // frames_per_batch
+    if total_iterations < 1:
+        raise ValueError(f"total_iterations must be >= 1 (computed {total_iterations}); check max_iterations/total_frames.")
     mini_batch_size = frames_per_batch // cfg.loss.num_minibatches
 
     actor, critic = make_ppo_models(env, cfg.network, device)
@@ -99,8 +111,16 @@ def main(cfg: DictConfig):
         metrics = {}
         done = data["next", "done"]
         if done.any():
-            metrics["train/episode_return"] = data["next", "episode_reward"][done].mean().item()
-            metrics["train/episode_length"] = data["next", "step_count"][done].float().mean().item()
+            # Under IsaacLabWrapper's native_autoreset=True, ("next", "episode_reward") and
+            # ("next", "step_count") are already reset (NaN / 0, respectively) on the very row where
+            # done=True -- the auto-reset happens inside that same env.step() call, so TorchRL treats
+            # the returned "next" as the start of the following episode (see docs/environment.md and
+            # tests/isaac/test_torchrl_episodes.py). The completed episode's return and length are
+            # reconstructed from the pre-step root tensordict (still valid) plus this step's reward.
+            completed_return = data["episode_reward"] + data["next", "reward"]
+            completed_length = data["step_count"] + 1
+            metrics["train/episode_return"] = completed_return[done].mean().item()
+            metrics["train/episode_length"] = completed_length[done].float().mean().item()
         metrics.update({f"episode_termination/{k}": v for k, v in termination_stats(env).items()})
 
         loss_sums: dict[str, float] = {}
@@ -108,7 +128,11 @@ def main(cfg: DictConfig):
         for _ in range(cfg.loss.ppo_epochs):
             with torch.no_grad():
                 data = adv_module(data)
-            buffer.extend(data.reshape(-1))
+            # ClipPPOLoss only reads root observations, action, log-prob, advantage and value_target;
+            # drop the "next" sub-tensordict (~4x larger for float32 camera frames, see
+            # food_robot/envs/mdp/observations.py::image_float and docs/environment.md) before it goes
+            # into the buffer.
+            buffer.extend(data.exclude("next").reshape(-1))
             for batch in buffer:
                 loss = loss_module(batch)
                 total = loss["loss_objective"] + loss["loss_critic"] + loss["loss_entropy"]

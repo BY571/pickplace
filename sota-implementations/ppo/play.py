@@ -61,7 +61,11 @@ def main(cfg: DictConfig):
         td = env.rollout(cfg.play.steps, actor, break_when_any_done=False)
     done = td["next", "done"]
     if done.any():
-        print("episode return:", td["next", "episode_reward"][done].mean().item())
+        # See sota-implementations/ppo/ppo.py: under native_autoreset=True, ("next", "episode_reward")
+        # is already reset (NaN) on the done row itself; reconstruct the completed return from the
+        # pre-step root tensordict plus this step's reward.
+        completed_return = td["episode_reward"] + td["next", "reward"]
+        print("episode return:", completed_return[done].mean().item())
     print("termination stats:", termination_stats(env))
     print("PLAY_DONE", flush=True)
     os._exit(0)

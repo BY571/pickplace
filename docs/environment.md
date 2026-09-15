@@ -17,10 +17,11 @@ the bowl leaves the zone — without knocking the bowl over or off the belt.
  │
  ●───────▶ x   Franka base at (0, 0, 0), table top at z = 0
  │
- │   ingredient bowl at (0.45, -0.30) with the food item
+ │   ingredient bowl at (0.45, -0.10) with the food item
 ```
 
-The bowl rests freely on a pallet driven by a prismatic joint whose velocity equals the belt speed, so
+The table is a plain 1.5 m × 1.1 m box (top at z = 0) covering the robot base, the ingredient bowl and the
+belt strip. The bowl rests freely on a pallet driven by a prismatic joint whose velocity equals the belt speed, so
 friction carries the bowl (and food inside it) exactly like a real conveyor; the bowl can still be pushed,
 tipped or knocked off.
 
@@ -169,7 +170,7 @@ Configure through constructor kwargs, e.g.
 | `cameras` | `True` | spawn wrist + overview cameras and add the `pixels` group |
 | `image_size` | `(128, 128)` | camera height, width |
 | `privileged_information` | `False` | add the simulation-only `privileged` group |
-| `ingredient_bowl_pos` | `(0.45, -0.30, 0.0)` | ingredient bowl position, cell frame |
+| `ingredient_bowl_pos` | `(0.45, -0.10, 0.0)` | ingredient bowl position, cell frame |
 | `overview_cam_eye` / `overview_cam_target` | `(1.6, -0.4, 1.4)` / `(0.35, 0.0, 0.25)` | overview camera placement |
 | `render_camera` | `False` | spawn `scene.render_cam`, a wide third-person camera for videos; not an observation, so the TorchRL specs don't change (the app must be launched with cameras enabled) |
 | `render_cam_eye` / `render_cam_target` | `(2.3, -1.9, 1.9)` / `(0.3, 0.0, 0.35)` | render camera placement (whole cell in view) |

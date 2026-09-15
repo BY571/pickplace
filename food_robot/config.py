@@ -30,7 +30,7 @@ DEFAULT_ENV: dict = {
     "bowl_failure_penalty": 150.0,
     "food_drop_penalty": 150.0,
     "success_settle_steps": 5,
-    "ingredient_bowl_pos": [0.45, -0.30, 0.0],
+    "ingredient_bowl_pos": [0.45, -0.10, 0.0],
     "overview_cam_eye": [1.6, -0.4, 1.4],
     "overview_cam_target": [0.35, 0.0, 0.25],
     "render_camera": False,

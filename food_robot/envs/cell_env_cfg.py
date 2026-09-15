@@ -22,11 +22,11 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg, FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg
 from isaaclab.utils.configclass import configclass
 from isaaclab_physx.assets import DeformableObjectCfg
 from isaaclab_physx.physics import PhysxCfg
+from isaaclab_physx.sim.schemas import CollisionPropertiesCfg
 
 from food_robot.arms import FRANKA_CFG, ArmCfg
 from food_robot.assets.scene_assets import make_bowl_cfg, make_pallet_cfg
@@ -52,10 +52,17 @@ class FoodCellSceneCfg(InteractiveSceneCfg):
     render_cam: CameraCfg | None = None
     """Wide third-person camera for videos; never part of the observations (see ``render_camera``)."""
 
+    # Plain box table, top surface at z = 0 in the cell frame. It spans x in [-0.30, 1.20] and y in [-0.55, 0.55],
+    # covering the robot base at the origin, the ingredient bowl and the whole belt strip (y = 0.30 +- 0.15).
+    # Replaces Isaac Lab's SeattleLabTable asset, which ships with a mounting rail that cluttered the scene.
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.5, 0.0, 0.0), rot=(0.0, 0.0, 0.707, 0.707)),
-        spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.45, 0.0, -0.40)),
+        spawn=sim_utils.CuboidCfg(
+            size=(1.50, 1.10, 0.80),
+            collision_props=CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.22, 0.22, 0.24), roughness=0.8),
+        ),
     )
     plane = AssetBaseCfg(
         prim_path="/World/GroundPlane",
@@ -177,7 +184,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     cameras: bool = True
     image_size: tuple[int, int] = (128, 128)
     privileged_information: bool = False
-    ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.30, 0.0)
+    ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.10, 0.0)
     overview_cam_eye: tuple[float, float, float] = (1.6, -0.4, 1.4)
     overview_cam_target: tuple[float, float, float] = (0.35, 0.0, 0.25)
     render_camera: bool = False

@@ -31,8 +31,12 @@ DEFAULT_ENV: dict = {
     "food_drop_penalty": 150.0,
     "success_settle_steps": 5,
     "ingredient_bowl_pos": [0.45, -0.30, 0.0],
-    "overview_cam_eye": [1.3, 0.0, 0.8],
-    "overview_cam_target": [0.45, 0.0, 0.0],
+    "overview_cam_eye": [1.6, -0.4, 1.4],
+    "overview_cam_target": [0.35, 0.0, 0.25],
+    "render_camera": False,
+    "render_cam_eye": [2.3, -1.9, 1.9],
+    "render_cam_target": [0.3, 0.0, 0.35],
+    "render_image_size": [720, 1280],
     "rewards": {},
     "food_params": {},
 }
@@ -105,6 +109,10 @@ def build_cell_env_cfg(env_cfg: Mapping):
         ingredient_bowl_pos=tuple(c["ingredient_bowl_pos"]),
         overview_cam_eye=tuple(c["overview_cam_eye"]),
         overview_cam_target=tuple(c["overview_cam_target"]),
+        render_camera=bool(c["render_camera"]),
+        render_cam_eye=tuple(c["render_cam_eye"]),
+        render_cam_target=tuple(c["render_cam_target"]),
+        render_image_size=tuple(c["render_image_size"]),
     )
     cfg.scene.num_envs = int(c["num_envs"])
     cfg.seed = c["seed"]

@@ -50,9 +50,10 @@ FRANKA_CFG = ArmCfg(
     tcp_offset=(0.0, 0.0, 0.1034),
     gripper_open=0.04,
     gripper_closed=0.0,
-    # same mount as Isaac Lab's Franka visuomotor stack task (xyzw, ROS convention)
-    wrist_cam_offset=CameraCfg.OffsetCfg(
-        pos=(0.13, 0.0, -0.15), rot=(0.03701, 0.03701, -0.70614, -0.70614), convention="ros"
-    ),
+    # Mounted on the back of the hand, off the finger axis (fingers slide along the hand's y axis), and tilted
+    # about the hand's y axis so the optical axis (+z in ROS convention) looks past the fingertips at a point
+    # 0.28 m ahead of the hand: from (0.10, 0, -0.03) towards (0, 0, 0.25) is a -19.7 deg rotation about y
+    # (xyzw). Mounted closer, the fingers and hand body fill the image.
+    wrist_cam_offset=CameraCfg.OffsetCfg(pos=(0.10, 0.0, -0.03), rot=(0.0, -0.1711, 0.0, 0.9853), convention="ros"),
     reach_radius=0.80,
 )

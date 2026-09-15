@@ -49,6 +49,8 @@ class FoodCellSceneCfg(InteractiveSceneCfg):
     belt_visual: AssetBaseCfg | None = None
     wrist_cam: CameraCfg | None = None
     overview_cam: CameraCfg | None = None
+    render_cam: CameraCfg | None = None
+    """Wide third-person camera for videos; never part of the observations (see ``render_camera``)."""
 
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
@@ -176,8 +178,14 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     image_size: tuple[int, int] = (128, 128)
     privileged_information: bool = False
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.30, 0.0)
-    overview_cam_eye: tuple[float, float, float] = (1.3, 0.0, 0.8)
-    overview_cam_target: tuple[float, float, float] = (0.45, 0.0, 0.0)
+    overview_cam_eye: tuple[float, float, float] = (1.6, -0.4, 1.4)
+    overview_cam_target: tuple[float, float, float] = (0.35, 0.0, 0.25)
+    render_camera: bool = False
+    """Spawn ``scene.render_cam``, a wide view of the whole cell for videos. It is not an observation, so it
+    does not change the TorchRL specs; the app must be launched with cameras enabled."""
+    render_cam_eye: tuple[float, float, float] = (2.3, -1.9, 1.9)
+    render_cam_target: tuple[float, float, float] = (0.3, 0.0, 0.35)
+    render_image_size: tuple[int, int] = (720, 1280)
     # Anti-exploit constraint (spec §5.5): each one-shot term below must exceed whatever dense shaping
     # a policy could still earn by deliberately ending the episode early instead of trying, so failing
     # early is never more profitable than a real attempt. Dense shaping (reach_food, grasp_lift,
@@ -296,6 +304,22 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         else:
             s.wrist_cam = None
             s.overview_cam = None
+        if self.render_camera:
+            rh, rw = self.render_image_size
+            s.render_cam = CameraCfg(
+                prim_path="{ENV_REGEX_NS}/render_cam",
+                update_period=0.0, height=rh, width=rw, data_types=["rgb"],
+                spawn=sim_utils.PinholeCameraCfg(
+                    focal_length=18.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.05, 10.0)
+                ),
+                offset=CameraCfg.OffsetCfg(
+                    pos=self.render_cam_eye,
+                    rot=look_at_quat_xyzw(self.render_cam_eye, self.render_cam_target),
+                    convention="world",
+                ),
+            )
+        else:
+            s.render_cam = None
 
     def _build_actions(self) -> None:
         arm = self.arm

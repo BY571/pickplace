@@ -80,6 +80,18 @@ commands to follow its logs (`ssh spark docker logs -f <name>`) and stop it (`ss
 <name>`). See [`sota-implementations/ppo/README.md`](sota-implementations/ppo/README.md) for observation
 routing and how to play a trained checkpoint.
 
+## Rendering
+
+`scripts/render_episode.py` records an MP4 of one cell: a wide scene camera (whole cell) on top and the two
+policy cameras (overview, wrist) below. A scripted motion (not a policy) hovers the hand over the food and
+then follows the bowl on the belt. It runs headless, so it works on the Spark:
+
+    ./scripts/spark.sh python scripts/render_episode.py out=outputs/render/episode.mp4 seconds=8
+    scp spark:food-robot/outputs/render/episode.mp4 .
+
+Env overrides work as elsewhere, e.g. `env.belt.speed=0.12`. Any env can add the scene camera with
+`render_camera=true` (see `docs/environment.md`); it is not an observation.
+
 ## Tests
 
     python -m pytest tests/unit -q     # no simulator

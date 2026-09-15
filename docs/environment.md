@@ -170,7 +170,10 @@ Configure through constructor kwargs, e.g.
 | `image_size` | `(128, 128)` | camera height, width |
 | `privileged_information` | `False` | add the simulation-only `privileged` group |
 | `ingredient_bowl_pos` | `(0.45, -0.30, 0.0)` | ingredient bowl position, cell frame |
-| `overview_cam_eye` / `overview_cam_target` | `(1.3, 0.0, 0.8)` / `(0.45, 0.0, 0.0)` | overview camera placement |
+| `overview_cam_eye` / `overview_cam_target` | `(1.6, -0.4, 1.4)` / `(0.35, 0.0, 0.25)` | overview camera placement |
+| `render_camera` | `False` | spawn `scene.render_cam`, a wide third-person camera for videos; not an observation, so the TorchRL specs don't change (the app must be launched with cameras enabled) |
+| `render_cam_eye` / `render_cam_target` | `(2.3, -1.9, 1.9)` / `(0.3, 0.0, 0.35)` | render camera placement (whole cell in view) |
+| `render_image_size` | `(720, 1280)` | render camera height, width |
 | `success_bonus` | `150.0` | return added on success |
 | `bowl_failure_penalty` | `150.0` | return subtracted when the bowl falls off or tips |
 | `food_drop_penalty` | `150.0` | return subtracted when the food falls off the table |

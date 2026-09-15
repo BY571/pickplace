@@ -6,6 +6,26 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 
 
+def _load_local_utils():
+    """Load this folder's ``utils.py`` by file path, not by bare ``import utils``.
+
+    Isaac Sim's camera/replicator extensions (loaded when ``enable_cameras=True``) put a bundled
+    OpenCV ``cv2/utils`` package where it can shadow a plain ``import utils``/``from utils import
+    ...`` regardless of ``sys.path`` order (observed: a top-level ``utils`` resolves to
+    ``.../cv2/utils/__init__.py``). Loading by explicit file path and registering the result in
+    ``sys.modules`` under the name ``utils`` sidesteps that shadowing.
+    """
+    import importlib.util
+    import sys
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "utils.py")
+    spec = importlib.util.spec_from_file_location("utils", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["utils"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @hydra.main(config_path="", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     from food_robot.app import launch_app
@@ -22,7 +42,9 @@ def main(cfg: DictConfig):
     from torchrl.record.loggers import generate_exp_name, get_logger
 
     from food_robot.torchrl_env import make_env, termination_stats
-    from utils import make_ppo_models, save_checkpoint
+
+    _utils = _load_local_utils()
+    make_ppo_models, save_checkpoint = _utils.make_ppo_models, _utils.save_checkpoint
 
     torch.manual_seed(cfg.env.seed)
     device = torch.device(cfg.env.device)
@@ -81,6 +103,8 @@ def main(cfg: DictConfig):
             metrics["train/episode_length"] = data["next", "step_count"][done].float().mean().item()
         metrics.update({f"episode_termination/{k}": v for k, v in termination_stats(env).items()})
 
+        loss_sums: dict[str, float] = {}
+        num_updates = 0
         for _ in range(cfg.loss.ppo_epochs):
             with torch.no_grad():
                 data = adv_module(data)
@@ -92,7 +116,11 @@ def main(cfg: DictConfig):
                 total.backward()
                 torch.nn.utils.clip_grad_norm_(loss_module.parameters(), cfg.optim.max_grad_norm)
                 optim.step()
-        metrics.update({f"train/{k}": v.item() for k, v in loss.items() if k.startswith("loss_")})
+                for key, value in loss.items():
+                    if key.startswith("loss_"):
+                        loss_sums[key] = loss_sums.get(key, 0.0) + value.detach().item()
+                num_updates += 1
+        metrics.update({f"train/{k}": v / num_updates for k, v in loss_sums.items()})
 
         if cfg.optim.anneal_lr:
             for group in optim.param_groups:

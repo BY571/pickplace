@@ -63,6 +63,10 @@ LayerNorm + ELU, fused by an MLP 512-256. Camera frames are stored as uint8 in t
 Config: `config_pixels.yaml` (scale settings from the benchmark in `docs/experiments/ppo_pixels_run1`).
 `reward_scale` scales the rewards used for GAE and the loss; logged returns are unscaled.
 
+Render a checkpoint (scene camera + the policy's camera inputs):
+
+    python scripts/render_episode.py policy=outputs/<date>/<time>/checkpoints/ppo_pixels_final.pt
+
 The run ends at `collector.total_frames` (1 billion env frames), or earlier once the training success rate reaches
 `early_stop.success_rate` (85%) in `early_stop.consecutive_iterations` (10) iterations in a row, after `max_hours`, or on
 SIGTERM (`ssh spark docker stop -t 600 <container>`). In every case the policy is saved as

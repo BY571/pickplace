@@ -78,6 +78,7 @@ them with `./scripts/spark.sh` from a laptop.
 | Train PPO | `cd sota-implementations/ppo && python ppo.py env.num_envs=4096` |
 | Play a checkpoint | `cd sota-implementations/ppo && python play.py play.checkpoint=<path>/ppo_final.pt` |
 | Render a video | `python scripts/render_episode.py out=outputs/render/episode.mp4 seconds=8` |
+| Render a trained pixel policy | `python scripts/render_episode.py policy=<checkpoint>` |
 | Unit tests (no simulator) | `python -m pytest tests/unit -q` |
 | Simulator tests (slow) | `python -m pytest tests/isaac -q` |
 

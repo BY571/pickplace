@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import MISSING
 from typing import Literal
 
@@ -131,6 +132,7 @@ class EventCfg:
         mode="reset",
         params={"position_range": (-0.02, 0.02), "velocity_range": (0.0, 0.0), "asset_cfg": SceneEntityCfg("robot")},
     )
+    reset_belt = EventTerm(func=mdp.reset_belt, mode="reset", params={})  # params set by _build_belt_terms
 
 
 @configclass
@@ -142,6 +144,9 @@ class RewardsCfg:
 @configclass
 class TerminationsCfg:
     time_out = DoneTerm(func=base_mdp.time_out, time_out=True)
+    bowl_exited_zone = DoneTerm(func=mdp.bowl_exited_zone, params={})
+    bowl_off_belt = DoneTerm(func=mdp.bowl_off_belt, params={})
+    bowl_tipped = DoneTerm(func=mdp.bowl_tipped, params={"max_tilt_rad": math.radians(45.0)})
 
 
 @configclass
@@ -193,6 +198,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self._build_actions()
         self._build_observations()
         self._build_events()
+        self._build_belt_terms(zone)
 
     # ------------------------------------------------------------------
     def _build_scene(self, zone) -> None:
@@ -296,3 +302,23 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self.events.reset_robot_joints.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=self.arm.arm_joint_names)
         for name, term in self.food.events.items():
             setattr(self.events, name, term)
+
+    def _build_belt_terms(self, zone) -> None:
+        belt = self.belt
+        self.events.reset_belt.params = {
+            "speed": belt.speed,
+            "speed_noise": belt.speed_noise,
+            "bowl_offset_x": belt.bowl_offset_x,
+            "bowl_offset_y": belt.bowl_offset_y,
+            "entry_x": belt.entry_x(),
+            "belt_y": belt.belt_y,
+            "plate_top_z": belt.plate_top_z,
+            "pallet_cfg": SceneEntityCfg("pallet"),
+            "bowl_cfg": SceneEntityCfg("bowl"),
+        }
+        self.terminations.bowl_exited_zone.params = {"zone_end_x": zone.end_x}
+        self.terminations.bowl_off_belt.params = {
+            "belt_y": belt.belt_y,
+            "belt_half_width": belt.belt_half_width,
+            "surface_z": belt.plate_top_z,
+        }

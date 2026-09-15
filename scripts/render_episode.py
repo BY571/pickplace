@@ -128,7 +128,11 @@ def run_policy():
     spec.loader.exec_module(utils_pixels)
 
     checkpoint = torch.load(policy_path, map_location="cpu", weights_only=False)
-    env_cfg = {**checkpoint["config"]["env"], **env_overrides, **RENDER_KEYS}
+    # Deep merge (not `{**a, **b, **c}`): a nested override like env.belt.speed=0.12 must merge into
+    # checkpoint["config"]["env"]["belt"], not replace it and drop its other fields (e.g. DR ranges).
+    env_cfg = OmegaConf.to_container(
+        OmegaConf.merge(checkpoint["config"]["env"], env_overrides, RENDER_KEYS), resolve=True
+    )
     env = make_env(env_cfg)
     u = env.base_env._env.unwrapped
     actor = utils_pixels.load_actor(policy_path, env, env.device)

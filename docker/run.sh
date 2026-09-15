@@ -5,17 +5,34 @@
 # third_party/IsaacLab/docker/docker-compose.yaml) plus a food_robot cache.
 #
 # Usage: ./docker/run.sh <command> [args...]
+#
+# Env overrides:
+#   DOCKER_DETACH=1   start the container detached (`docker run -d`) instead of
+#                      attached; the command keeps running after this script
+#                      returns. Combine with DOCKER_NAME to name it (see
+#                      scripts/spark.sh --detach, which sets both).
+#   DOCKER_NAME=<name> container name; only meaningful with DOCKER_DETACH=1.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${FOOD_ROBOT_IMAGE:-food-robot:latest}"
 
-TTY_FLAGS=()
-if [[ -t 0 ]]; then
-  TTY_FLAGS=(-it)
+RUN_FLAGS=()
+if [[ "${DOCKER_DETACH:-0}" == "1" ]]; then
+  RUN_FLAGS+=(-d)
+  if [[ -n "${DOCKER_NAME:-}" ]]; then
+    RUN_FLAGS+=(--name "$DOCKER_NAME")
+  fi
+  # No --rm here: a detached run's whole point is to be inspected (`docker logs`)
+  # and cleaned up (`docker stop`/`docker rm`) after this script has returned.
+else
+  RUN_FLAGS+=(--rm)
+  if [[ -t 0 ]]; then
+    RUN_FLAGS+=(-it)
+  fi
 fi
 
-exec docker run --rm "${TTY_FLAGS[@]}" \
+exec docker run "${RUN_FLAGS[@]}" \
   --gpus all --network host --ipc=host \
   -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y -e OMNI_KIT_ACCEPT_EULA=YES -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v "$ROOT":/workspace/food-robot \

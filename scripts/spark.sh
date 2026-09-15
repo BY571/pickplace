@@ -3,9 +3,10 @@
 # By default the command runs inside the food-robot Docker image
 # (docker/run.sh), which handles all aarch64 / Isaac Sim quirks. Pass a
 # leading --host to run the command directly on the Spark host instead
-# (e.g. to build the image itself).
+# (e.g. to build the image itself), or a leading --detach to start it in a
+# named, detached container and return immediately (long training runs).
 #
-# Usage: ./scripts/spark.sh [--host] <command> [args...]
+# Usage: ./scripts/spark.sh [--host|--detach] <command> [args...]
 # Env overrides: SPARK_HOST (default: spark), SPARK_DIR (default: ~/food-robot)
 #
 # Note: args are embedded (shell-quoted via printf %q) into the heredoc sent
@@ -19,18 +20,39 @@ SPARK_DIR="${SPARK_DIR:-~/food-robot}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 HOST_MODE=0
-if [[ "${1:-}" == "--host" ]]; then
-  HOST_MODE=1
-  shift
-fi
+DETACH_MODE=0
+case "${1:-}" in
+  --host)
+    HOST_MODE=1
+    shift
+    ;;
+  --detach)
+    DETACH_MODE=1
+    shift
+    ;;
+esac
 
 rsync -az --delete \
   --exclude .git --exclude .venv --exclude third_party --exclude .superpowers \
   --exclude outputs --exclude multirun --exclude checkpoints \
   --exclude __pycache__ --exclude .pytest_cache \
+  --exclude logs --exclude wandb \
   "$ROOT"/ "${SPARK_HOST}:${SPARK_DIR}/"
 
 printf -v CMD '%q ' "$@"
+
+if [[ "$DETACH_MODE" -eq 1 ]]; then
+  NAME="food-robot-$(date +%Y%m%d-%H%M%S)"
+  ssh "$SPARK_HOST" bash -s <<EOF
+set -euo pipefail
+cd $SPARK_DIR
+DOCKER_DETACH=1 DOCKER_NAME=$NAME ./docker/run.sh $CMD
+EOF
+  echo "Started detached container: $NAME"
+  echo "Follow logs: ssh $SPARK_HOST docker logs -f $NAME"
+  echo "Stop:        ssh $SPARK_HOST docker stop $NAME"
+  exit 0
+fi
 
 RUN_PREFIX=""
 [[ "$HOST_MODE" -eq 1 ]] || RUN_PREFIX="./docker/run.sh "

@@ -18,6 +18,13 @@ NVIDIA GPU with >= 16 GB VRAM recommended.
     ./docker/build.sh
     ./docker/run.sh python scripts/verify_install.py
 
+The container runs as the non-root `isaaclab` user and keeps Isaac Sim / Isaac Lab caches and the
+generated USD assets in named Docker volumes (listed in `docker/volumes.sh`). `docker/build.sh`
+makes every volume writable for that user; if a volume ever becomes unwritable (e.g. created by an
+older image or by root), repair it with:
+
+    ./docker/fix-volume-permissions.sh
+
 From a laptop checkout, `scripts/spark.sh` rsyncs the repo to the server and
 runs the command inside the container by default; a leading `--host` runs it
 directly on the server instead (e.g. to build the image):

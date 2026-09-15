@@ -37,3 +37,7 @@ docker build \
   .
 
 echo "Built ${BASE_TAG} and food-robot:latest"
+
+# Existing named volumes are not re-seeded by a new image; make sure all of
+# them are writable by the container's runtime user.
+"$ROOT/docker/fix-volume-permissions.sh"

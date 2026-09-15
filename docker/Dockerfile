@@ -64,14 +64,21 @@ ENV ACCEPT_EULA=Y \
     OMNI_KIT_ACCEPT_EULA=YES \
     NVIDIA_DRIVER_CAPABILITIES=all
 
-# Pre-create the food_robot USD cache dir owned by the runtime user. The
-# container runs as `isaaclab` but DOCKER_USER_HOME (inherited from the base
-# image) is /root, so food_robot.assets.usd_builders.CACHE_DIR defaults under
-# /root/.cache/food_robot; docker/run.sh mounts a named volume there. Docker
-# seeds a freshly-created named volume from whatever already exists at that
-# path in the image (ownership included), so this keeps first-use mkdir()
-# calls from hitting a root-owned, isaaclab-unwritable directory.
-RUN mkdir -p /root/.cache/food_robot && chown -R isaaclab:isaaclab /root/.cache/food_robot
+# Pre-create every path docker/run.sh mounts a named volume on (listed in
+# docker/volumes.sh) owned by the runtime user. The container runs as `isaaclab`
+# but DOCKER_USER_HOME (inherited from the base image) is /root, so all caches
+# live under /root and /isaac-sim. Docker seeds a freshly-created named volume
+# from whatever exists at that path in the image (ownership included), so this
+# keeps first-use writes from hitting a root-owned, isaaclab-unwritable
+# directory. Volumes that already exist are not re-seeded by Docker; repair
+# those with docker/fix-volume-permissions.sh (build.sh runs it).
+COPY docker/volumes.sh /tmp/food-robot-volumes.sh
+RUN . /tmp/food-robot-volumes.sh && \
+    for spec in "${FOOD_ROBOT_VOLUMES[@]}"; do \
+      path="${spec#*:}"; \
+      mkdir -p "$path" && chown -R isaaclab:isaaclab "$path"; \
+    done && \
+    rm /tmp/food-robot-volumes.sh
 
 USER isaaclab
 WORKDIR /workspace/food-robot

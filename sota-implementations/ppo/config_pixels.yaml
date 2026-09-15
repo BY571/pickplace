@@ -1,0 +1,85 @@
+# Pixel PPO (run 1): actor and critic see only robot state (proprio) and the two frame-stacked cameras.
+# Scale settings marked "benchmark" come from docs/experiments/ppo_pixels_run1/benchmark.
+env:
+  task: FoodRobot-Cell-v0
+  num_envs: 256              # benchmark
+  arm: franka
+  food: rigid
+  action_mode: ee_delta_pose
+  cameras: true
+  image_size: [84, 84]       # benchmark
+  frame_stack: 3
+  privileged_information: false
+  belt:
+    speed: 0.08
+    speed_noise: 0.0
+    place_window: 5.0
+    pallet_start_range: [-0.08, 0.08]
+    bowl_offset_x: [-0.02, 0.02]
+    bowl_offset_y: [-0.04, 0.04]
+  ingredient_bowl_x_range: [0.35, 0.55]
+  ingredient_bowl_y_range: [-0.20, 0.00]
+  rewards: {}
+  food_params: {}
+  seed: 0
+  device: cuda:0
+
+app:
+  headless: true
+
+network:
+  actor_in_keys: [proprio, pixels]
+  critic_in_keys: [proprio, pixels]
+  cnn_channels: [32, 64, 64]
+  cnn_kernels: [8, 4, 3]
+  cnn_strides: [4, 2, 1]
+  image_embed: 256
+  proprio_embed: 128
+  fusion: [512, 256]
+
+collector:
+  rollout_steps: 32          # benchmark
+  total_frames: 1_000_000_000  # training budget in env frames (also the LR annealing horizon)
+
+max_iterations: null         # overrides total_frames when set
+max_hours: null              # stop cleanly (final checkpoint) after this much wall time
+
+early_stop:
+  success_rate: 0.85         # stop (after saving the final checkpoint) once the training success rate (over all
+  consecutive_iterations: 10 # episodes finished in an iteration) reaches this for this many iterations in a row;
+                             # success_rate: null disables
+
+optim:
+  lr: 3.0e-4
+  anneal_lr: true
+  max_grad_norm: 1.0
+
+loss:
+  gamma: 0.99
+  gae_lambda: 0.95
+  ppo_epochs: 4
+  mini_batch_size: 4096      # benchmark
+  clip_epsilon: 0.2
+  entropy_coeff: 0.005
+  critic_coeff: 0.5
+  gae_env_chunk: 256         # envs per value-network pass when computing GAE (bounds activation memory)
+
+reward_scale: 0.1            # applied to rewards used for GAE/loss only; logged returns are unscaled
+
+eval:
+  interval_iterations: 100   # benchmark: deterministic evaluation (0 disables)
+  video_interval_evals: 2    # log eval/policy_view every N evaluations (0 disables)
+  video_upscale: 2
+
+logger:
+  backend: wandb             # wandb | csv | tensorboard | null
+  project_name: food_robot
+  group: ppo_pixels_run1
+  exp_name: ppo_pixels
+
+checkpoint:
+  interval_iterations: 200   # benchmark: ~every 30 min
+
+hydra:
+  job:
+    chdir: true

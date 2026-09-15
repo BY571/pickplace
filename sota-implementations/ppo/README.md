@@ -50,6 +50,34 @@ Group names expand to all their terms; nested keys select one term.
 
 Example: `python ppo.py env.cameras=true env.num_envs=256 'network.actor_in_keys=[proprio,belt,[pixels,wrist_rgb]]'`
 
+## Pixels (`ppo_pixels.py`)
+
+PPO from the two cameras (3 stacked frames each) plus robot state only — no privileged food state and no belt
+bowl position — with geometric domain randomization of the supply bowl, bowl arrival time and lateral offset
+(see `docs/media/ppo_pixels_run1_dr_ranges.png`). Actor and critic are separate networks with the same
+structure: one CNN per camera (32/64/64 channels, kernels 8/4/3, strides 4/2/1 → 256), proprio → Linear 128 +
+LayerNorm + ELU, fused by an MLP 512-256. Camera frames are stored as uint8 in the replay buffer.
+
+    ./scripts/spark.sh --detach python sota-implementations/ppo/ppo_pixels.py
+
+Config: `config_pixels.yaml` (scale settings from the benchmark in `docs/experiments/ppo_pixels_run1`).
+`reward_scale` scales the rewards used for GAE and the loss; logged returns are unscaled.
+
+The run ends at `collector.total_frames` (1 billion env frames), or earlier once the training success rate reaches
+`early_stop.success_rate` (85%) in `early_stop.consecutive_iterations` (10) iterations in a row, after `max_hours`, or on
+SIGTERM (`ssh spark docker stop -t 600 <container>`). In every case the policy is saved as
+`checkpoints/ppo_pixels_final.pt` first, and a `STOP_REASON {json}` line says why it ended.
+
+Logged metrics (W&B, and one `METRICS {json}` stdout line per iteration):
+
+- `train/success_rate` and `train/<outcome>_rate`: fraction of the episodes that finished in the batch that ended
+  by each termination (`success`, `bowl_exited_zone`, `bowl_off_belt`, `bowl_tipped`, `food_off_table`,
+  `time_out`), from the env's `("next", "outcome", <term>)` entries; `train/episode_return`, `train/episode_length`
+- `episode_reward/<term>`: per-term episodic reward (Isaac Lab reward manager)
+- `eval/*`: every `eval.interval_iterations`, all envs are reset and run deterministically until each finished
+  one episode; `eval/policy_view` is a video of env 0's camera inputs
+- `perf/*`: env steps/s, collect/update seconds, frames/hour, memory
+
 ## Logged metrics
 
 - `train/episode_return`, `train/episode_length`

@@ -2,6 +2,9 @@
 
 Isaac Lab environment of a robot arm placing food into bowls moving on a conveyor belt, runnable with TorchRL.
 
+- Environment and parameters: [`docs/environment.md`](docs/environment.md)
+- Algorithms: [`sota-implementations/`](sota-implementations/) (PPO first)
+
 ## Install
 
 Two install paths: Docker (for servers, e.g. the DGX Spark) or a bare `uv`
@@ -35,3 +38,26 @@ Then:
     source .venv/bin/activate
 
 See `docs/environment.md` for the environment and its parameters.
+
+## Quick check
+
+Prints the TorchRL spec tree, runs `check_env_specs` and a short random rollout:
+
+    python scripts/check_env.py env.num_envs=4 env.cameras=false env.privileged_information=true          # inside the container / venv
+    ./scripts/spark.sh python scripts/check_env.py env.num_envs=4 env.cameras=false env.privileged_information=true   # from a laptop, runs on the Spark
+
+## Train
+
+    cd sota-implementations/ppo && python ppo.py env.num_envs=4096
+
+From a laptop: `./scripts/spark.sh python sota-implementations/ppo/ppo.py env.num_envs=4096`. See
+[`sota-implementations/ppo/README.md`](sota-implementations/ppo/README.md) for observation routing and how
+to play a trained checkpoint.
+
+## Tests
+
+    python -m pytest tests/unit -q     # no simulator
+    python -m pytest tests/isaac -q    # simulator scenarios (slow)
+
+From a laptop, both run on the Spark via `./scripts/spark.sh python -m pytest tests/unit -q` (and likewise
+for `tests/isaac`).

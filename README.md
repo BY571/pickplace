@@ -2,6 +2,16 @@
 
 Isaac Lab environment of a robot arm placing food into bowls moving on a conveyor belt, runnable with TorchRL.
 
+<p align="center">
+  <img src="docs/media/training_setup.gif" alt="Food cell: Franka arm, ingredient bowl with food, and a bowl riding the conveyor belt" width="480">
+</p>
+
+**Top:** scene camera showing the whole cell (for humans, not an observation). **Bottom:** exactly what the
+policy sees, the two camera observations at their training resolution (128×128): `overview_rgb` (left) and
+`wrist_rgb` (right). The arm follows a scripted motion (hover over the food, then follow the moving bowl), not a
+trained policy. [Full-resolution video](docs/media/training_setup.mp4), regenerated with
+`scripts/render_episode.py` (see [Rendering](#rendering)).
+
 - Environment and parameters: [`docs/environment.md`](docs/environment.md)
 - Algorithms: [`sota-implementations/`](sota-implementations/) (PPO first)
 

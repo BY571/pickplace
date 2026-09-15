@@ -9,16 +9,17 @@ from omegaconf import OmegaConf
 from tensordict import TensorDict
 from torchrl.data import Bounded, Composite, Unbounded
 from torchrl.envs import ExplorationType, set_exploration_type
+from torchrl.objectives.value.advantages import GAE
 
 REPO = Path(__file__).resolve().parents[2]
 N, H, K = 4, 64, 3
 
 
-def _load(name):
+def _load(name, module_name=None):
     path = REPO / "sota-implementations" / "ppo" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name, path)
+    spec = importlib.util.spec_from_file_location(module_name or name, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[module_name or name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -91,6 +92,41 @@ def test_uint8_and_float_pixels_give_identical_outputs():
     with set_exploration_type(ExplorationType.DETERMINISTIC):
         torch.testing.assert_close(actor(as_float.clone())["loc"], actor(as_uint8.clone())["loc"])
     torch.testing.assert_close(critic(as_float)["state_value"], critic(as_uint8)["state_value"])
+
+
+def test_load_actor_restores_weights_from_a_checkpoint(tmp_path):
+    ppo_utils = _load("utils", module_name="ppo_utils_for_checkpoint_test")
+    actor, critic = up.make_ppo_models(fake_env(), NETWORK, torch.device("cpu"))
+    optim = torch.optim.Adam(actor.parameters(), lr=1e-3)
+    cfg = OmegaConf.create({"network": NETWORK})
+    path = tmp_path / "checkpoint.pt"
+    ppo_utils.save_checkpoint(path, actor, critic, optim, cfg, frames=0)
+
+    loaded_actor = up.load_actor(path, fake_env(), torch.device("cpu"))
+    obs = fake_obs()
+    with set_exploration_type(ExplorationType.DETERMINISTIC):
+        torch.testing.assert_close(actor(obs.clone())["loc"], loaded_actor(obs.clone())["loc"])
+
+
+def test_compute_advantage_in_env_chunks_matches_single_pass():
+    T = 5
+    _, critic = up.make_ppo_models(fake_env(), NETWORK, torch.device("cpu"))
+    obs = fake_obs().unsqueeze(1).expand(N, T).clone()
+    next_obs = fake_obs().unsqueeze(1).expand(N, T).clone()
+    done = torch.zeros(N, T, 1, dtype=torch.bool)
+    done[:, -1] = True
+    data = obs
+    data["next"] = next_obs
+    data["next", "reward"] = torch.randn(N, T, 1)
+    data["next", "done"] = done
+    data["next", "terminated"] = done.clone()
+
+    adv_module = GAE(gamma=0.99, lmbda=0.95, value_network=critic, average_gae=False)
+    full = up.compute_advantage(adv_module, data.clone(True), env_chunk=0)
+    chunked = up.compute_advantage(adv_module, data.clone(True), env_chunk=3)
+
+    torch.testing.assert_close(full["advantage"], chunked["advantage"])
+    torch.testing.assert_close(full["value_target"], chunked["value_target"])
 
 
 def test_image_keys_finds_only_images():

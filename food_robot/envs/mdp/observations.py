@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -32,6 +32,40 @@ def image_float(env: ManagerBasedEnv, sensor_cfg: SceneEntityCfg, data_type: str
     from isaaclab.envs import mdp as base_mdp
 
     return base_mdp.image(env, sensor_cfg=sensor_cfg, data_type=data_type, normalize=False).float()
+
+
+class stacked_image_float(ManagerTermBase):
+    """Last ``frame_stack`` camera frames stacked along channels, cast to float32 (values stay in [0, 255]).
+
+    Wraps Isaac Lab's ``stacked_image`` (per-env history, filled with the current frame after a reset) with
+    ``normalize=False`` and the float32 cast explained in ``image_float``. Output ``(N, H, W, 3 * frame_stack)``,
+    oldest frame first.
+
+    Isaac Lab's observation manager requires class terms to subclass ``ManagerTermBase`` (it checks
+    ``issubclass(term_cfg.func, ManagerTermBase)`` before instantiating, and later calls
+    ``term_cfg.func.reset()`` only ``if isinstance(term_cfg.func, ManagerTermBase)``), so this wraps
+    ``stacked_image`` by subclassing rather than by plain delegation.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedEnv):
+        from isaaclab.envs.mdp.observations import stacked_image
+
+        super().__init__(cfg, env)
+        self._stacked = stacked_image(cfg, env)
+
+    def reset(self, env_ids: torch.Tensor | None = None):
+        self._stacked.reset(env_ids)
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        sensor_cfg: SceneEntityCfg,
+        data_type: str = "rgb",
+        frame_stack: int = 1,
+    ) -> torch.Tensor:
+        return self._stacked(
+            env, sensor_cfg=sensor_cfg, data_type=data_type, frame_stack=frame_stack, normalize=False
+        ).float()
 
 
 def asset_pos_cell(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:

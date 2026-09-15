@@ -72,7 +72,7 @@ All groups are nested (`concatenate_terms=False`), so TorchRL keys look like `("
 | | | `ee_quat` | 4 | tool orientation (x, y, z, w) |
 | | | `last_action` | 7 / 8 | previous action |
 | `belt` | always | `bowl_pos` | 3 | bowl position, cell frame |
-| `pixels` | `cameras=True` | `wrist_rgb`, `overview_rgb` | H×W×3 | camera images from the `image_float` term: float32, values in [0, 255] (not normalized) |
+| `pixels` | `cameras=True` | `wrist_rgb`, `overview_rgb` | H×W×(3·frame_stack) | camera images from the `image_float` term: float32, values in [0, 255] (not normalized) |
 | `privileged` | `privileged_information=True` | `food_pos` | 3 | food position, cell frame (simulation only) |
 | | | `food_quat` | 4 | food orientation (simulation only) |
 | | | `is_grasped` | 1 | 1.0 if the food is held (simulation only) |
@@ -91,9 +91,9 @@ docstring in `food_robot/envs/mdp/observations.py`). TorchRL additionally stores
 observation at the root of a transition and one at `"next"`, so each camera term costs roughly:
 
 ```
-bytes_per_frame ≈ n_cams × H × W × 3 × 4     (root)
-bytes_per_frame ≈ n_cams × H × W × 3 × 4     (next)
-total ≈ num_envs × 2 × n_cams × H × W × 3 × 4 bytes, per buffered transition
+bytes_per_frame ≈ n_cams × H × W × 3 × frame_stack × 4     (root)
+bytes_per_frame ≈ n_cams × H × W × 3 × frame_stack × 4     (next)
+total ≈ num_envs × 2 × n_cams × H × W × 3 × frame_stack × 4 bytes, per buffered transition
 ```
 
 With the default two cameras (`wrist_rgb`, `overview_rgb`) at `image_size=(128, 128)`: `2 × 128 × 128 ×
@@ -101,6 +101,9 @@ With the default two cameras (`wrist_rgb`, `overview_rgb`) at `image_size=(128, 
 collector/replay buffer (before accounting for `frames_per_batch` rollout steps buffered at once).
 Multiply by `frames_per_batch = num_envs × collector.rollout_steps` to get the buffer's peak size, e.g.
 at `rollout_steps=24` that is `≈ 18.9 MB/env` per PPO iteration's buffer.
+
+With frame_stack=3 every number above triples; storing pixels as uint8 in the replay buffer (as
+sota-implementations/ppo/ppo_pixels.py does) divides it by 4.
 
 On the 128 GB unified-memory Spark, leaving headroom for PhysX/rendering buffers and the network, a
 reasonable starting range with both default cameras at 128×128 is `num_envs` in the low hundreds to
@@ -172,6 +175,7 @@ The randomization ranges used for the first pixel PPO run are drawn to scale in
 | `action_mode` | `"ee_delta_pose"` | `"ee_delta_pose"` or `"joint_pos"` |
 | `cameras` | `True` | spawn wrist + overview cameras and add the `pixels` group |
 | `image_size` | `(128, 128)` | camera height, width |
+| `frame_stack` | `1` | camera frames stacked along channels per pixel observation (3 → H×W×9, oldest first); history resets per env |
 | `privileged_information` | `False` | add the simulation-only `privileged` group |
 | `ingredient_bowl_pos` | `(0.45, -0.10, 0.0)` | nominal ingredient bowl position (spawn pose; z is used at every reset) |
 | `ingredient_bowl_x_range` / `ingredient_bowl_y_range` | `(0.35, 0.55)` / `(-0.20, 0.00)` | reset randomization of the ingredient bowl position (cell frame); validated against arm reach and belt clearance |

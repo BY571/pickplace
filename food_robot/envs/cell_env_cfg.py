@@ -192,6 +192,9 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     action_mode: ActionMode = "ee_delta_pose"
     cameras: bool = True
     image_size: tuple[int, int] = (128, 128)
+    frame_stack: int = 1
+    """Number of most recent camera frames stacked along the channel axis of each pixel observation.
+    1 = single frame (H x W x 3); 3 = H x W x 9, oldest frame first. History resets per env."""
     privileged_information: bool = False
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.10, 0.0)
     ingredient_bowl_x_range: tuple[float, float] = (0.35, 0.55)
@@ -251,6 +254,8 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             friction_correlation_distance=0.00625,
         )
         validate_observation_flags(self.cameras, self.privileged_information)
+        if not isinstance(self.frame_stack, int) or self.frame_stack < 1:
+            raise ValueError(f"frame_stack must be an int >= 1, got {self.frame_stack!r}.")
         if self.action_mode not in ("ee_delta_pose", "joint_pos"):
             raise ValueError(f"Unknown action_mode {self.action_mode!r}; use 'ee_delta_pose' or 'joint_pos'.")
         if self.food.num_items != 1:
@@ -387,6 +392,16 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         obs.proprio.gripper_pos.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=arm.gripper_joint_names)
         if not self.cameras:
             obs.pixels = None
+        elif self.frame_stack > 1:
+            for name, sensor in (("wrist_rgb", "wrist_cam"), ("overview_rgb", "overview_cam")):
+                setattr(
+                    obs.pixels,
+                    name,
+                    ObsTerm(
+                        func=mdp.stacked_image_float,
+                        params={"sensor_cfg": SceneEntityCfg(sensor), "data_type": "rgb", "frame_stack": self.frame_stack},
+                    ),
+                )
         if self.privileged_information:
             obs.privileged.is_grasped.params.update(
                 robot_cfg=SceneEntityCfg("robot", joint_names=arm.gripper_joint_names),

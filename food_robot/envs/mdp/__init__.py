@@ -9,6 +9,7 @@ from food_robot.envs.mdp.observations import (
     gripper_pos,
     image_float,
     is_grasped,
+    stacked_image_float,
 )
 from food_robot.envs.mdp.events import reset_belt, reset_food_in_bowl, reset_ingredient_bowl
 from food_robot.envs.mdp.terminations import bowl_exited_zone, bowl_off_belt, bowl_tipped

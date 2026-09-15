@@ -6,106 +6,73 @@ Isaac Lab environment of a robot arm placing food into bowls moving on a conveyo
   <img src="docs/media/training_setup.gif" alt="Food cell: Franka arm, ingredient bowl with food, and a bowl riding the conveyor belt" width="480">
 </p>
 
-**Top:** scene camera showing the whole cell (for humans, not an observation). **Bottom:** exactly what the
-policy sees, the two camera observations at their training resolution (128×128): `overview_rgb` (left) and
-`wrist_rgb` (right). The arm follows a scripted motion (hover over the food, then follow the moving bowl), not a
-trained policy. [Full-resolution video](docs/media/training_setup.mp4), regenerated with
-`scripts/render_episode.py` (see [Rendering](#rendering)).
+**Top:** scene camera showing the whole cell (for humans, not an observation). **Bottom:** what the policy
+sees, the two camera observations at training resolution (128×128): `overview_rgb` (left) and `wrist_rgb`
+(right). The arm follows a scripted motion, not a trained policy. [Full-resolution video](docs/media/training_setup.mp4)
 
-- Environment and parameters: [`docs/environment.md`](docs/environment.md)
-- Algorithms: [`sota-implementations/`](sota-implementations/) (PPO first)
+- **Environment and all parameters:** [`docs/environment.md`](docs/environment.md)
+- **Algorithms:** [`sota-implementations/`](sota-implementations/) (PPO first)
 
 ## Install
 
-Two install paths: Docker (for servers, e.g. the DGX Spark) or a bare `uv`
-virtual environment (for a local workstation).
+<details>
+<summary><b>Server / DGX Spark (Docker)</b> — recommended, verified</summary>
 
-### Server / DGX Spark (Docker)
-
-Requires Docker with the NVIDIA Container Toolkit (`--gpus all`) and an
-NVIDIA GPU with >= 16 GB VRAM recommended.
+Requires Docker with the NVIDIA Container Toolkit and an NVIDIA GPU (≥ 16 GB VRAM recommended).
 
     ./docker/build.sh
     ./docker/run.sh python scripts/verify_install.py
 
-The container runs as the non-root `isaaclab` user and keeps Isaac Sim / Isaac Lab caches and the
-generated USD assets in named Docker volumes (listed in `docker/volumes.sh`). `docker/build.sh`
-makes every volume writable for that user; if a volume ever becomes unwritable (e.g. created by an
-older image or by root), repair it with:
+The container runs as the non-root `isaaclab` user and keeps the Isaac Sim / Isaac Lab caches and generated
+USD assets in named volumes (`docker/volumes.sh`). If a volume ever becomes unwritable, repair it with
+`./docker/fix-volume-permissions.sh` (`build.sh` runs it automatically).
 
-    ./docker/fix-volume-permissions.sh
+</details>
 
-From a laptop checkout, `scripts/spark.sh` rsyncs the repo to the server and
-runs the command inside the container by default; a leading `--host` runs it
-directly on the server instead (e.g. to build the image):
+<details>
+<summary><b>Local workstation (bare uv)</b> — untested</summary>
 
-    ./scripts/spark.sh python -m pytest tests/unit -q
-    ./scripts/spark.sh --host ./docker/build.sh
-
-### Local (bare uv)
-
-**Untested in this repo.** Development and all verification (unit tests, simulator tests, the PPO
-scale run) happened exclusively on the DGX Spark through Docker; `scripts/setup_env.sh` and the
-steps below have never been exercised end-to-end here. Treat this path as a starting point, not a
-verified install.
-
-Requires an NVIDIA GPU with >= 16 GB VRAM recommended. On aarch64 this also
-needs the apt packages Isaac Lab's arm64 build depends on:
-
-    sudo apt install python3.12-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev cmake build-essential
-
-Then:
+Development and all verification happened on the DGX Spark through Docker; this path has never been run
+end-to-end. Requires an NVIDIA GPU (≥ 16 GB VRAM recommended).
 
     OMNI_KIT_ACCEPT_EULA=YES ./scripts/setup_env.sh
     source .venv/bin/activate
 
-**aarch64 note:** Isaac Sim's bundled OpenMP/carb libraries must be preloaded before Python starts on
-aarch64, per the Isaac Lab docs, or extension loading fails with unresolved-symbol errors:
+On aarch64, first install the build dependencies, and preload Isaac Sim's OpenMP/carb libraries before
+starting Python:
 
-    export LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1:<venv site-packages>/omni/client/libcarb.so
+    sudo apt install python3.12-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev cmake build-essential
+    export LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1:.venv/lib/python3.12/site-packages/omni/client/libcarb.so
 
-(`<venv site-packages>` is typically `.venv/lib/python3.12/site-packages`.)
+</details>
 
-See `docs/environment.md` for the environment and its parameters.
+<details>
+<summary><b>Working from a laptop</b> — run everything on the server</summary>
 
-## Quick check
+`scripts/spark.sh` rsyncs the repo to the server and runs the command inside the container; `--host` runs
+it on the server itself, and `--detach` starts it in a named background container.
 
-Prints the TorchRL spec tree, runs `check_env_specs` and a short random rollout:
+    ./scripts/spark.sh --host ./docker/build.sh
+    ./scripts/spark.sh python -m pytest tests/unit -q
+    ./scripts/spark.sh --detach python sota-implementations/ppo/ppo.py env.num_envs=4096
 
-    python scripts/check_env.py env.num_envs=4 env.cameras=false env.privileged_information=true          # inside the container / venv
-    ./scripts/spark.sh python scripts/check_env.py env.num_envs=4 env.cameras=false env.privileged_information=true   # from a laptop, runs on the Spark
+`--detach` prints the container name and the commands to follow (`ssh spark docker logs -f <name>`) and
+stop (`ssh spark docker stop <name>`) the run. Commands below are shown as run inside the container; prefix
+them with `./scripts/spark.sh` from a laptop.
 
-## Train
+</details>
 
-    cd sota-implementations/ppo && python ppo.py env.num_envs=4096
+## Usage
 
-From a laptop: `./scripts/spark.sh python sota-implementations/ppo/ppo.py env.num_envs=4096`. This runs
-attached to your terminal (the ssh session must stay open). For a long run, start it detached instead:
+| Task | Command |
+|---|---|
+| Inspect specs + random rollout | `python scripts/check_env.py env.num_envs=4 env.cameras=false env.privileged_information=true` |
+| Train PPO | `cd sota-implementations/ppo && python ppo.py env.num_envs=4096` |
+| Play a checkpoint | `cd sota-implementations/ppo && python play.py play.checkpoint=<path>/ppo_final.pt` |
+| Render a video | `python scripts/render_episode.py out=outputs/render/episode.mp4 seconds=8` |
+| Unit tests (no simulator) | `python -m pytest tests/unit -q` |
+| Simulator tests (slow) | `python -m pytest tests/isaac -q` |
 
-    ./scripts/spark.sh --detach python sota-implementations/ppo/ppo.py env.num_envs=4096 logger.backend=wandb
-
-`--detach` rsyncs the repo, then starts the command in a named, detached container
-(`food-robot-<timestamp>`) on the Spark and returns immediately, printing the container name plus the
-commands to follow its logs (`ssh spark docker logs -f <name>`) and stop it (`ssh spark docker stop
-<name>`). See [`sota-implementations/ppo/README.md`](sota-implementations/ppo/README.md) for observation
-routing and how to play a trained checkpoint.
-
-## Rendering
-
-`scripts/render_episode.py` records an MP4 of one cell: a wide scene camera (whole cell) on top and the two
-policy cameras (overview, wrist) below. A scripted motion (not a policy) hovers the hand over the food and
-then follows the bowl on the belt. It runs headless, so it works on the Spark:
-
-    ./scripts/spark.sh python scripts/render_episode.py out=outputs/render/episode.mp4 seconds=8
-    scp spark:food-robot/outputs/render/episode.mp4 .
-
-Env overrides work as elsewhere, e.g. `env.belt.speed=0.12`. Any env can add the scene camera with
-`render_camera=true` (see `docs/environment.md`); it is not an observation.
-
-## Tests
-
-    python -m pytest tests/unit -q     # no simulator
-    python -m pytest tests/isaac -q    # simulator scenarios (slow)
-
-From a laptop, both run on the Spark via `./scripts/spark.sh python -m pytest tests/unit -q` (and likewise
-for `tests/isaac`).
+Observation routing, measured throughput and play options: [`sota-implementations/ppo/README.md`](sota-implementations/ppo/README.md).
+Rendering adds a wide scene camera (`render_camera=true`, not an observation) above the policy's camera
+inputs; env overrides work as elsewhere, e.g. `env.belt.speed=0.12`.

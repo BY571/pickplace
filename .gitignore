@@ -1,0 +1,17 @@
+# environments / third party
+.venv/
+third_party/
+# python
+__pycache__/
+*.egg-info/
+.pytest_cache/
+# run artifacts
+outputs/
+multirun/
+logs/
+wandb/
+checkpoints/
+*.pt
+# internal scaffolding (never commit)
+docs/superpowers/
+.superpowers/

@@ -160,7 +160,9 @@ def write_csv(rows, csv_path):
         writer.writerows(rows)
 
 
-def phase_a(grid, out, csv_path):
+def phase_a(grid, existing_b, out, csv_path):
+    """Run Phase A. Every incremental write includes ``existing_b`` so a re-run with phases=A(B) against a
+    CSV that already has completed Phase-B rows can never overwrite them with Phase-A-only content."""
     rows = []
     for image in grid["images"]:
         for n in grid["num_envs"]:
@@ -179,7 +181,7 @@ def phase_a(grid, out, csv_path):
                             "env_steps_per_s": round(bench[-1]["env_steps_per_s"], 1)})
             rows.append(row)
             print(f"[benchmark] {json.dumps(row)}", flush=True)
-            write_csv(rows, csv_path)
+            write_csv(list(existing_b) + rows, csv_path)
     return rows
 
 
@@ -310,12 +312,12 @@ def plot(rows, out, total_gb):
     panels = 3 if len(b) else 2
     fig, axes = plt.subplots(panels, 1, figsize=(15, 5.5 * panels))
 
-    def finish(ax, title, xlabel, ylabel):
+    def finish(ax, title, xlabel, ylabel, legend_kwargs=None):
         ax.set_title(title, fontsize=15)
         ax.set_xlabel(xlabel, fontsize=15)
         ax.set_ylabel(ylabel, fontsize=15)
         ax.tick_params(labelsize=12)
-        ax.legend(fontsize=13, loc="best")
+        ax.legend(fontsize=13, **(legend_kwargs or {"loc": "best"}))
 
     for ax, column, title, ylabel, fmt in [
         (axes[0], "env_steps_per_s", "Env-only throughput (random actions, 3 stacked frames)", "Env steps per second",
@@ -342,9 +344,12 @@ def plot(rows, out, total_gb):
                          label=f"{series} ({float(last.frames_per_hour) / 1e6:.1f} M/h)", linewidth=2.5, marker="o", ax=ax)
         ax.set_xscale("log", base=2)
         ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{int(v):,}"))
-        finish(ax, "Full PPO iterations (4 epochs)", "Minibatch size", "Env frames per hour (millions)")
+        # Up to 7 series on this panel: "best" placement lands the legend box on top of the flatter,
+        # lower-throughput lines. Anchor it outside the axes instead so it can never cover data.
+        finish(ax, "Full PPO iterations (4 epochs)", "Minibatch size", "Env frames per hour (millions)",
+               legend_kwargs={"loc": "center left", "bbox_to_anchor": (1.01, 0.5)})
     fig.tight_layout()
-    fig.savefig(out / "benchmark.png", dpi=150)
+    fig.savefig(out / "benchmark.png", dpi=150, bbox_inches="tight")
 
 
 def main():
@@ -371,7 +376,7 @@ def main():
 
     rows = []
     if "A" in phases:
-        rows = phase_a(grid, out, csv_path)
+        rows = phase_a(grid, existing_b, out, csv_path)
     elif csv_path.exists():
         with open(csv_path) as f:
             rows = [r for r in csv.DictReader(f) if r["phase"] == "A"]
@@ -380,11 +385,10 @@ def main():
         for r in rows_a:
             r["peak_used_gb"] = float(r["peak_used_gb"])
         rows += phase_b(grid, rows_a, existing_b, out, total_gb, csv_path)
+    else:
+        rows += existing_b  # this invocation didn't touch Phase B; keep its previously measured rows
 
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(rows, csv_path)
     selected = select([r for r in rows if r["phase"] == "B"], total_gb)
     summary = {"total_memory_gb": round(total_gb, 1), "budget_gb": round(MEMORY_FRACTION * total_gb, 1),
                "max_update_share": MAX_UPDATE_SHARE, "selected": selected}

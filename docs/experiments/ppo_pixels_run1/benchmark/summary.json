@@ -1,0 +1,30 @@
+{
+  "total_memory_gb": 121.7,
+  "budget_gb": 97.4,
+  "max_update_share": 0.8,
+  "selected": {
+    "num_envs": 512,
+    "image": 84,
+    "rollout_steps": 16,
+    "mini_batch_size": 4096,
+    "frames_per_hour": 4438733.0,
+    "iteration_s": 6.644,
+    "eval_batches": 32,
+    "peak_used_gb": 62.1,
+    "suggested": {
+      "env.num_envs": 512,
+      "env.image_size": [
+        84,
+        84
+      ],
+      "collector.rollout_steps": 16,
+      "loss.mini_batch_size": 4096,
+      "hours_for_total_frames": 243.8,
+      "eval.interval_iterations": 136,
+      "checkpoint.interval_iterations": 251,
+      "sanity_total_frames": 2981888,
+      "sanity_eval_interval_iterations": 63,
+      "sanity_checkpoint_interval_iterations": 84
+    }
+  }
+}

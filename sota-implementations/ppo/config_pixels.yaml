@@ -2,7 +2,7 @@
 # Scale settings marked "benchmark" come from docs/experiments/ppo_pixels_run1/benchmark.
 env:
   task: FoodRobot-Cell-v0
-  num_envs: 256              # benchmark
+  num_envs: 512              # benchmark
   arm: franka
   food: rigid
   action_mode: ee_delta_pose
@@ -38,7 +38,7 @@ network:
   fusion: [512, 256]
 
 collector:
-  rollout_steps: 32          # benchmark
+  rollout_steps: 16          # benchmark
   total_frames: 1_000_000_000  # training budget in env frames (also the LR annealing horizon)
 
 max_iterations: null         # overrides total_frames when set
@@ -67,7 +67,7 @@ loss:
 reward_scale: 0.1            # applied to rewards used for GAE/loss only; logged returns are unscaled
 
 eval:
-  interval_iterations: 100   # benchmark: deterministic evaluation (0 disables)
+  interval_iterations: 136   # benchmark: deterministic evaluation (0 disables)
   video_interval_evals: 2    # log eval/policy_view every N evaluations (0 disables)
   video_upscale: 2
 
@@ -78,7 +78,7 @@ logger:
   exp_name: ppo_pixels
 
 checkpoint:
-  interval_iterations: 200   # benchmark: ~every 30 min
+  interval_iterations: 251   # benchmark: ~every 30 min
 
 hydra:
   job:

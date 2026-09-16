@@ -166,10 +166,31 @@ def compress_pixels(td: TensorDictBase, keys) -> TensorDictBase:
 
 
 def compute_advantage(adv_module, data: TensorDictBase, env_chunk: int) -> TensorDictBase:
-    """GAE over chunks of envs (dim 0) so the critic never sees all envs x steps x images at once."""
+    """GAE over chunks of envs (dim 0) so the critic never sees all envs x steps x images at once.
+
+    The estimator's outputs are written back into ``data`` key by key instead of concatenating the chunk
+    tensordicts. TorchRL replaces NaN next-observations on a shallow *copy* of the tensordict it was handed
+    (``ValueEstimatorBase._sanitize_next_obs_nan``) and then writes ``state_value`` into that copy, so a
+    chunk holding a NaN comes back without ``state_value`` while its siblings keep it, and ``torch.cat``
+    rejects the mismatched key sets. Only keys every chunk produced are written, which is exactly what a
+    single unchunked pass would leave behind.
+    """
     if env_chunk <= 0 or data.shape[0] <= env_chunk:
         return adv_module(data)
-    return torch.cat([adv_module(chunk) for chunk in data.split(env_chunk, dim=0)], dim=0)
+    value_key = adv_module.tensor_keys.value
+    keys = (adv_module.tensor_keys.advantage, adv_module.tensor_keys.value_target, value_key, ("next", value_key))
+    num_chunks, outputs = 0, {}
+    for chunk in data.split(env_chunk, dim=0):
+        out = adv_module(chunk)
+        num_chunks += 1
+        for key in keys:
+            tensor = out.get(key, default=None)
+            if tensor is not None:
+                outputs.setdefault(key, []).append(tensor)
+    for key, tensors in outputs.items():
+        if len(tensors) == num_chunks:
+            data.set(key, torch.cat(tensors, dim=0))
+    return data
 
 
 def _metrics(data: TensorDictBase, done: torch.Tensor, prefix: str) -> dict[str, float]:

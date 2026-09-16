@@ -108,25 +108,51 @@ def test_load_actor_restores_weights_from_a_checkpoint(tmp_path):
         torch.testing.assert_close(actor(obs.clone())["loc"], loaded_actor(obs.clone())["loc"])
 
 
-def test_compute_advantage_in_env_chunks_matches_single_pass():
+def _gae_rollout(nan_envs=()):
+    """An (N, T) rollout carrying the keys the collector produces; ``nan_envs`` get a NaN next-observation."""
     T = 5
-    _, critic = up.make_ppo_models(fake_env(), NETWORK, torch.device("cpu"))
-    obs = fake_obs().unsqueeze(1).expand(N, T).clone()
-    next_obs = fake_obs().unsqueeze(1).expand(N, T).clone()
+    g = torch.Generator().manual_seed(1)
+    data = fake_obs().unsqueeze(1).expand(N, T).clone()
+    data["next"] = fake_obs().unsqueeze(1).expand(N, T).clone()
     done = torch.zeros(N, T, 1, dtype=torch.bool)
     done[:, -1] = True
-    data = obs
-    data["next"] = next_obs
-    data["next", "reward"] = torch.randn(N, T, 1)
+    data["next", "reward"] = torch.randn(N, T, 1, generator=g)
     data["next", "done"] = done
     data["next", "terminated"] = done.clone()
+    for env in nan_envs:
+        data["next", "proprio", "joint_pos"][env, -1] = float("nan")
+    return data
 
-    adv_module = GAE(gamma=0.99, lmbda=0.95, value_network=critic, average_gae=False)
-    full = up.compute_advantage(adv_module, data.clone(True), env_chunk=0)
-    chunked = up.compute_advantage(adv_module, data.clone(True), env_chunk=3)
+
+def _gae_module():
+    _, critic = up.make_ppo_models(fake_env(), NETWORK, torch.device("cpu"))
+    return GAE(gamma=0.99, lmbda=0.95, value_network=critic, average_gae=False)
+
+
+def test_compute_advantage_in_env_chunks_matches_single_pass():
+    adv_module = _gae_module()
+    full = up.compute_advantage(adv_module, _gae_rollout(), env_chunk=0)
+    chunked = up.compute_advantage(adv_module, _gae_rollout(), env_chunk=3)
 
     torch.testing.assert_close(full["advantage"], chunked["advantage"])
     torch.testing.assert_close(full["value_target"], chunked["value_target"])
+    assert set(full.keys()) == set(chunked.keys())
+
+
+def test_compute_advantage_over_epochs_with_a_nan_next_observation_in_one_chunk():
+    # TorchRL sanitizes NaN next-observations on a *copy* of the tensordict it was handed, so the
+    # chunk holding one comes back without "state_value" while the other keeps it: chunking must not
+    # depend on the chunks having matching key sets. The PPO epoch loop recomputes GAE on the same
+    # batch once per epoch, so every epoch has to survive that mismatch.
+    adv_module = _gae_module()
+    full = up.compute_advantage(adv_module, _gae_rollout(nan_envs=(0,)), env_chunk=0)
+    data = _gae_rollout(nan_envs=(0,))
+    for _ in range(4):
+        data = up.compute_advantage(adv_module, data, env_chunk=2)
+
+    torch.testing.assert_close(full["advantage"], data["advantage"])
+    torch.testing.assert_close(full["value_target"], data["value_target"])
+    assert set(full.keys()) == set(data.keys())
 
 
 def test_image_keys_finds_only_images():

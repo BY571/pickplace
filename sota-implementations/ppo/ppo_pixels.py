@@ -169,8 +169,9 @@ def main(cfg: DictConfig):
             video = up.policy_view_video(frames, pixel_keys, cfg.eval.video_upscale)[:length]
         return results, video
 
-    # Every way of ending the run goes through the final checkpoint below. `docker stop -t 600 <container>` sends
-    # SIGTERM: the current iteration finishes, then the loop exits and saves.
+    # Every way of ending the run goes through the final checkpoint below. `docker exec <container> pkill -TERM
+    # -f "kit/python/bin/python3.* ppo_pixels.py"` sends SIGTERM: the current iteration finishes, then the loop
+    # exits and saves. `docker stop` does not reach this process through Isaac Sim's python.sh wrapper.
     stop = {"reason": "total_frames"}
     signal.signal(signal.SIGTERM, lambda *_: stop.update(reason="sigterm"))
     early_stop_on = cfg.early_stop.success_rate is not None
@@ -178,98 +179,103 @@ def main(cfg: DictConfig):
 
     frames_total, evals, start = 0, 0, time.monotonic()
     pbar = tqdm.tqdm(total=total_iterations, desc="iterations")
-    for iteration in range(total_iterations):
-        if stop["reason"] != "total_frames":
-            break
-        if cfg.max_hours and time.monotonic() - start > cfg.max_hours * 3600:
-            stop["reason"] = "max_hours"
-            break
-        torch.cuda.reset_peak_memory_stats(device)
-        t0 = time.perf_counter()
-        data = next(data_iter)
-        torch.cuda.synchronize(device)
-        collect_s = time.perf_counter() - t0
-        frames_total += data.numel()
-        metrics = {"iteration": iteration}
-        metrics.update(up.episode_metrics(data, "train"))
-        early_stop_reached = success_streak.update(metrics.get("train/success_rate"))
-        metrics["train/success_streak"] = success_streak.count
-        metrics.update({f"episode_reward/{k}": v for k, v in reward_term_stats(env).items()})
+    # The policy is always saved as the last checkpoint, whatever ends the run (budget, early stop, time,
+    # SIGTERM, or an exception) — the loop body is wrapped so the finally below always runs.
+    try:
+        for iteration in range(total_iterations):
+            if stop["reason"] != "total_frames":
+                break
+            if cfg.max_hours and time.monotonic() - start > cfg.max_hours * 3600:
+                stop["reason"] = "max_hours"
+                break
+            torch.cuda.reset_peak_memory_stats(device)
+            t0 = time.perf_counter()
+            data = next(data_iter)
+            torch.cuda.synchronize(device)
+            collect_s = time.perf_counter() - t0
+            frames_total += data.numel()
+            metrics = {"iteration": iteration}
+            metrics.update(up.episode_metrics(data, "train"))
+            early_stop_reached = success_streak.update(metrics.get("train/success_rate"))
+            metrics["train/success_streak"] = success_streak.count
+            metrics.update({f"episode_reward/{k}": v for k, v in reward_term_stats(env).items()})
 
-        t1 = time.perf_counter()
-        data.set(("next", "reward"), data.get(("next", "reward")) * cfg.reward_scale)
-        loss_sums, num_updates = {}, 0
-        for _ in range(cfg.loss.ppo_epochs):
-            with torch.no_grad():
-                data = up.compute_advantage(adv_module, data, cfg.loss.gae_env_chunk)
-            # ClipPPOLoss reads root observations, action, log-prob, advantage and value_target only: drop
-            # "next" and store camera frames as uint8 (together ~8x smaller than the collected float batch).
-            buffer.extend(up.compress_pixels(data.exclude("next").reshape(-1), pixel_keys))
-            for batch in buffer:
-                loss = loss_module(batch)
-                total = loss["loss_objective"] + loss["loss_critic"] + loss["loss_entropy"]
-                optim.zero_grad(set_to_none=True)
-                total.backward()
-                torch.nn.utils.clip_grad_norm_(loss_module.parameters(), cfg.optim.max_grad_norm)
-                optim.step()
-                for key in ("loss_objective", "loss_critic", "loss_entropy", "entropy", "kl_approx", "clip_fraction"):
-                    if key in loss.keys():
-                        loss_sums[key] = loss_sums.get(key, 0.0) + loss[key].detach().float().mean()
-                num_updates += 1
-        torch.cuda.synchronize(device)
-        update_s = time.perf_counter() - t1
+            t1 = time.perf_counter()
+            data.set(("next", "reward"), data.get(("next", "reward")) * cfg.reward_scale)
+            loss_sums, num_updates = {}, 0
+            for _ in range(cfg.loss.ppo_epochs):
+                with torch.no_grad():
+                    data = up.compute_advantage(adv_module, data, cfg.loss.gae_env_chunk)
+                # ClipPPOLoss reads root observations, action, log-prob, advantage and value_target only: drop
+                # "next" and store camera frames as uint8 (together ~8x smaller than the collected float batch).
+                buffer.extend(up.compress_pixels(data.exclude("next").reshape(-1), pixel_keys))
+                for batch in buffer:
+                    loss = loss_module(batch)
+                    total = loss["loss_objective"] + loss["loss_critic"] + loss["loss_entropy"]
+                    optim.zero_grad(set_to_none=True)
+                    total.backward()
+                    torch.nn.utils.clip_grad_norm_(loss_module.parameters(), cfg.optim.max_grad_norm)
+                    optim.step()
+                    for key in ("loss_objective", "loss_critic", "loss_entropy", "entropy", "kl_approx", "clip_fraction"):
+                        if key in loss.keys():
+                            loss_sums[key] = loss_sums.get(key, 0.0) + loss[key].detach().float().mean()
+                    num_updates += 1
+            torch.cuda.synchronize(device)
+            update_s = time.perf_counter() - t1
 
-        metrics.update({f"train/{k}": (v / num_updates).item() for k, v in loss_sums.items()})
-        metrics["train/lr"] = optim.param_groups[0]["lr"]
-        metrics.update(
-            {
-                "perf/collect_s": collect_s,
-                "perf/update_s": update_s,
-                "perf/env_steps_per_s": frames_per_batch / collect_s,
-                "perf/frames_per_hour": frames_per_batch / (collect_s + update_s) * 3600.0,
-                "perf/gradient_steps_per_s": num_updates / update_s,
-                "perf/memory_used_gb": _memory_used_gb(),
-                "perf/cuda_peak_allocated_gb": torch.cuda.max_memory_allocated(device) / 1024**3,
-                "perf/elapsed_h": (time.monotonic() - start) / 3600.0,
-            }
-        )
-        if cfg.optim.anneal_lr:
-            for group in optim.param_groups:
-                group["lr"] = cfg.optim.lr * (1.0 - (iteration + 1) / total_iterations)
-        collector.update_policy_weights_()
+            metrics.update({f"train/{k}": (v / num_updates).item() for k, v in loss_sums.items()})
+            metrics["train/lr"] = optim.param_groups[0]["lr"]
+            metrics.update(
+                {
+                    "perf/collect_s": collect_s,
+                    "perf/update_s": update_s,
+                    "perf/env_steps_per_s": frames_per_batch / collect_s,
+                    "perf/frames_per_hour": frames_per_batch / (collect_s + update_s) * 3600.0,
+                    "perf/gradient_steps_per_s": num_updates / update_s,
+                    "perf/memory_used_gb": _memory_used_gb(),
+                    "perf/cuda_peak_allocated_gb": torch.cuda.max_memory_allocated(device) / 1024**3,
+                    "perf/elapsed_h": (time.monotonic() - start) / 3600.0,
+                }
+            )
+            if cfg.optim.anneal_lr:
+                for group in optim.param_groups:
+                    group["lr"] = cfg.optim.lr * (1.0 - (iteration + 1) / total_iterations)
+            collector.update_policy_weights_()
 
-        video = None
-        if cfg.eval.interval_iterations and (iteration + 1) % cfg.eval.interval_iterations == 0:
-            with_video = bool(cfg.eval.video_interval_evals) and evals % cfg.eval.video_interval_evals == 0
-            t2 = time.perf_counter()
-            eval_metrics, video = evaluate(with_video)
-            metrics.update(eval_metrics)
-            metrics["perf/eval_s"] = time.perf_counter() - t2
-            evals += 1
+            video = None
+            if cfg.eval.interval_iterations and (iteration + 1) % cfg.eval.interval_iterations == 0:
+                with_video = bool(cfg.eval.video_interval_evals) and evals % cfg.eval.video_interval_evals == 0
+                t2 = time.perf_counter()
+                eval_metrics, video = evaluate(with_video)
+                metrics.update(eval_metrics)
+                metrics["perf/eval_s"] = time.perf_counter() - t2
+                evals += 1
 
-        print("METRICS " + json.dumps({"frames": frames_total, **metrics}), flush=True)
-        if logger is not None:
-            for key, value in metrics.items():
-                logger.log_scalar(key, value, step=frames_total)
-            if video is not None and cfg.logger.backend == "wandb":
-                logger.log_video(
-                    "eval/policy_view", video, step=frames_total, fps=round(1.0 / unwrapped.step_dt), format="mp4"
-                )
-        pbar.update(1)
-        if cfg.checkpoint.interval_iterations and (iteration + 1) % cfg.checkpoint.interval_iterations == 0:
-            save_checkpoint(f"checkpoints/ppo_pixels_{frames_total}.pt", actor, critic, optim, cfg, frames_total)
-        if early_stop_on and early_stop_reached:
-            stop["reason"] = "early_stop"
-            break
-
-    # The policy is always saved as the last checkpoint, whatever ended the run (budget, early stop, time, SIGTERM).
-    save_checkpoint("checkpoints/ppo_pixels_final.pt", actor, critic, optim, cfg, frames_total)
-    stop_info = {"reason": stop["reason"], "frames": frames_total, "success_streak": success_streak.count}
-    print("STOP_REASON " + json.dumps(stop_info), flush=True)
-    collector.shutdown()
-    if logger is not None and cfg.logger.backend == "wandb":
-        logger.experiment.summary.update({f"stop/{k}": v for k, v in stop_info.items()})
-        logger.experiment.finish()  # flush the run: os._exit below skips wandb's exit hooks
+            print("METRICS " + json.dumps({"frames": frames_total, **metrics}), flush=True)
+            if logger is not None:
+                for key, value in metrics.items():
+                    logger.log_scalar(key, value, step=frames_total)
+                if video is not None and cfg.logger.backend == "wandb":
+                    logger.log_video(
+                        "eval/policy_view", video, step=frames_total, fps=round(1.0 / unwrapped.step_dt), format="mp4"
+                    )
+            pbar.update(1)
+            if cfg.checkpoint.interval_iterations and (iteration + 1) % cfg.checkpoint.interval_iterations == 0:
+                save_checkpoint(f"checkpoints/ppo_pixels_{frames_total}.pt", actor, critic, optim, cfg, frames_total)
+            if early_stop_on and early_stop_reached:
+                stop["reason"] = "early_stop"
+                break
+    except BaseException as error:  # noqa: BLE001 - save the policy, then re-raise
+        stop["reason"] = f"error: {type(error).__name__}"
+        raise
+    finally:
+        save_checkpoint("checkpoints/ppo_pixels_final.pt", actor, critic, optim, cfg, frames_total)
+        stop_info = {"reason": stop["reason"], "frames": frames_total, "success_streak": success_streak.count}
+        print("STOP_REASON " + json.dumps(stop_info), flush=True)
+        collector.shutdown()
+        if logger is not None and cfg.logger.backend == "wandb":
+            logger.experiment.summary.update({f"stop/{k}": v for k, v in stop_info.items()})
+            logger.experiment.finish()  # flush the run: os._exit below skips wandb's exit hooks
     print("PPO_DONE", flush=True)
     os._exit(0)  # Isaac Sim shutdown can hang
 

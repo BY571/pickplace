@@ -31,8 +31,13 @@ class RigidFoodCfg(FoodSourceCfg):
     that justifies this range."""
     restitution_range: tuple[float, float] = (0.0, 0.1)
     mass_scale_range: tuple[float, float] = (0.7, 1.3)
-    spawn_range: float = 0.02
-    """Food spawn xy randomization (± m) around the ingredient bowl's position in this reset."""
+    spawn_range: float = 0.06
+    """Food spawn xy randomization (+- m) around the ingredient bowl's position in this reset. Raised from
+    0.02 in task 14 alongside the wider supply tray (``FoodCellEnvCfg.supply_bowl``, inner_radius 0.11 m):
+    ``reset_food_in_bowl`` samples a square of +-spawn_range, so the worst-case corner is
+    0.06 * sqrt(2) = 0.085 m from the tray centre, plus the 0.02 m food radius = 0.105 m, inside the 0.11 m
+    inner wall. The bowl's own position is now fixed (see ``ingredient_bowl_x_range``/``_y_range``), so this
+    is where the policy's xy localization challenge now lives."""
 
     def __post_init__(self):
         self.asset = RigidObjectCfg(
@@ -47,7 +52,10 @@ class RigidFoodCfg(FoodSourceCfg):
                 mass_props=sim_utils.MassPropertiesCfg(mass=self.mass),
                 collision_props=CollisionPropertiesCfg(),
                 physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.9, dynamic_friction=0.7),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.55, 0.27, 0.07)),
+                # Green (task 14): the scene is a white robot, off-white bowls and a grey table, so green
+                # separates the food from everything else far better than the old brown, especially at
+                # 84x84-128x128 px.
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.15, 0.60, 0.20)),
             ),
             init_state=RigidObjectCfg.InitialStateCfg(),
         )

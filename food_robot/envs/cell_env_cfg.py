@@ -30,6 +30,7 @@ from isaaclab_physx.sim.schemas import CollisionPropertiesCfg
 
 from food_robot.arms import FRANKA_CFG, ArmCfg
 from food_robot.assets.scene_assets import make_bowl_cfg, make_pallet_cfg
+from food_robot.assets.usd_builders import BowlGeometry
 from food_robot.belt import BeltCfg
 from food_robot.envs import mdp
 from food_robot.food import FoodSourceCfg, RigidFoodCfg
@@ -200,10 +201,19 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     1 = single frame (H x W x 3); 3 = H x W x 9, oldest frame first. History resets per env."""
     privileged_information: bool = False
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.10, 0.0)
-    ingredient_bowl_x_range: tuple[float, float] = (0.35, 0.55)
-    """Reset randomization of the ingredient bowl's x position (cell frame). A single value fixes it."""
-    ingredient_bowl_y_range: tuple[float, float] = (-0.20, 0.00)
-    """Reset randomization of the ingredient bowl's y position (cell frame)."""
+    ingredient_bowl_x_range: tuple[float, float] = (0.45, 0.45)
+    """Reset randomization of the ingredient bowl's x position (cell frame). Degenerate (fixed) by default as
+    of task 14: the food is randomized inside the tray instead (see ``RigidFoodCfg.spawn_range``), which
+    covers a comparable xy spread while the container itself stays put. The field is kept, range and all, so
+    bowl position DR can be switched back on."""
+    ingredient_bowl_y_range: tuple[float, float] = (-0.10, -0.10)
+    """Reset randomization of the ingredient bowl's y position (cell frame). See ``ingredient_bowl_x_range``."""
+    supply_bowl: BowlGeometry = BowlGeometry(inner_radius=0.11, wall_height=0.015)
+    """Ingredient container: wide and shallow (task 14) so a top-down gripper can straddle the food without
+    bottoming its hand on the rim -- see ``task-13-debug-report.md``'s H2 (a 5 cm rim sat 1 cm above the top
+    of the food; the hand fouled the rim, not the fingers fouling the wall). The destination bowl on the belt
+    keeps its own deeper geometry (``belt.bowl``) -- the two are deliberately separate configs; widening this
+    one does not change the pallet/success-termination geometry at all."""
     overview_cam_eye: tuple[float, float, float] = (1.5, 0.1, 1.0)
     overview_cam_target: tuple[float, float, float] = (0.3, 0.1, 0.3)
     render_camera: bool = False
@@ -272,10 +282,11 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         validate_bowl_on_pallet(
             belt.pallet.size[:2], bowl_outer_radius, belt.bowl_offset_x, belt.bowl_offset_y, belt.belt_half_width
         )
+        supply_bowl_outer_radius = self.supply_bowl.inner_radius + self.supply_bowl.wall_thickness
         validate_supply_bowl_range(
             self.ingredient_bowl_x_range,
             self.ingredient_bowl_y_range,
-            bowl_outer_radius,
+            supply_bowl_outer_radius,
             self.arm.reach_radius,
             belt.belt_y,
             belt.belt_half_width,
@@ -311,8 +322,8 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         base_z = belt.plate_top_z - belt.pallet.size[2]
         s.pallet = make_pallet_cfg(belt.pallet, "{ENV_REGEX_NS}/Pallet", (belt.entry_x(), belt.belt_y, base_z), belt.pallet_damping)
         s.bowl = make_bowl_cfg(belt.bowl, "{ENV_REGEX_NS}/Bowl", (belt.entry_x(), belt.belt_y, belt.plate_top_z + 0.002), kinematic=False)
-        s.ingredient_bowl = make_bowl_cfg(belt.bowl, "{ENV_REGEX_NS}/IngredientBowl", self.ingredient_bowl_pos, kinematic=True)
-        food_z = self.ingredient_bowl_pos[2] + belt.bowl.base_thickness + self.food.item_radius + 0.005
+        s.ingredient_bowl = make_bowl_cfg(self.supply_bowl, "{ENV_REGEX_NS}/IngredientBowl", self.ingredient_bowl_pos, kinematic=True)
+        food_z = self.ingredient_bowl_pos[2] + self.supply_bowl.base_thickness + self.food.item_radius + 0.005
         s.food = self.food.asset.replace(
             prim_path="{ENV_REGEX_NS}/Food",
             init_state=RigidObjectCfg.InitialStateCfg(pos=(self.ingredient_bowl_pos[0], self.ingredient_bowl_pos[1], food_z)),
@@ -466,7 +477,11 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             "bowl_cfg": SceneEntityCfg("ingredient_bowl"),
         }
         if hasattr(self.events, "reset_food"):
-            self.events.reset_food.params["height_above_bowl"] = bowl.base_thickness + self.food.item_radius + 0.005
+            # the food rests in the *supply* bowl, not the destination bowl `bowl` aliases below (belt.bowl,
+            # used only for the success termination's geometry) -- task 14 split the two containers.
+            self.events.reset_food.params["height_above_bowl"] = (
+                self.supply_bowl.base_thickness + self.food.item_radius + 0.005
+            )
 
         # NOTE: a fresh SceneEntityCfg is built for every term's params (never shared) because
         # Isaac Lab resolves joint_ids in place; sharing one instance across manager term params

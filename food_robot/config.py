@@ -32,8 +32,11 @@ DEFAULT_ENV: dict = {
     "food_drop_penalty": 150.0,
     "success_settle_steps": 5,
     "ingredient_bowl_pos": [0.45, -0.10, 0.0],
-    "ingredient_bowl_x_range": [0.35, 0.55],
-    "ingredient_bowl_y_range": [-0.20, 0.00],
+    # Fixed as of task 14 (was [0.35, 0.55] / [-0.20, 0.00]): the food is randomized inside the wider supply
+    # tray instead (RigidFoodCfg.spawn_range), so the container itself no longer needs its own position DR.
+    # Kept as a real range (not folded into a single value) so it can be widened again later.
+    "ingredient_bowl_x_range": [0.45, 0.45],
+    "ingredient_bowl_y_range": [-0.10, -0.10],
     "overview_cam_eye": [1.5, 0.1, 1.0],
     "overview_cam_target": [0.3, 0.1, 0.3],
     "render_camera": False,

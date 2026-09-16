@@ -17,8 +17,11 @@ env:
     pallet_start_range: [-0.08, 0.08]
     bowl_offset_x: [-0.02, 0.02]
     bowl_offset_y: [-0.04, 0.04]
-  ingredient_bowl_x_range: [0.35, 0.55]
-  ingredient_bowl_y_range: [-0.20, 0.00]
+  # Fixed as of task 14 (was [0.35, 0.55] / [-0.20, 0.00]): the supply tray is wide, shallow and fixed;
+  # the food is randomized inside it instead (RigidFoodCfg.spawn_range, default 0.06 m). See
+  # docs/environment.md's "Known limitation (task 13)" note and task-14-report.md.
+  ingredient_bowl_x_range: [0.45, 0.45]
+  ingredient_bowl_y_range: [-0.10, -0.10]
   rewards: {}
   food_params: {}
   seed: 0

@@ -117,3 +117,16 @@ Success was still 0% and `grasp_lift` still 0 at 2.8 M frames — 1.4% of the tr
 
   `docker stop` does not work: Isaac Sim's `python.sh` starts Python without `exec`, so SIGTERM reaches the bash
   wrapper and is never forwarded.
+
+## Improvements for the next run
+
+Collected while run 1 was in progress; none of them was applied to it.
+
+| Change | Why |
+|---|---|
+| Evaluate every ~5 M frames (`eval.interval_iterations: 610`) instead of every 1.1 M (136) | Each evaluation resets every env and collects ~32 batches — a full episode for all 512 envs — costing ~8% of wall-clock at the current interval, against under 2% at 5 M frames. The curve does not need that resolution. |
+| Judge the sanity gate on the deterministic evaluation return, not the training return | Run 1's sanity gate failed its trend check while the policy was clearly improving: each tipped bowl costs −150, so the training return collapses exactly when the policy first starts touching the bowl. The evaluation return rose steadily throughout. |
+| Keep camera observations as uint8 end to end | The collector holds each batch twice in float32, which is what forced 512 envs (62 GB) rather than 1024 (112 GB, 4% faster). uint8 observations would cut that ~4x and open up the larger, faster configurations. |
+| Re-run the smoke tests after any change to the exit path | The crash-safety wrapper (`a29a2fc`) went in without its smoke tests being re-run, because the launch agent died first. The exit path was verified by reading instead. |
+| Revisit the PPO update cost | 65-69% of every iteration is the update (two CNN encoders x 4 epochs), so throughput is update-bound, not simulation-bound. Fewer epochs or a lighter critic encoder would raise frames/hour directly. |
+| Investigate the grasp stage if `grasp_lift` stays at 0 | Reaching improves steadily, but nothing past it has been exercised yet, so the grasp detection thresholds and gripper control remain unproven in training. |

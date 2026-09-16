@@ -5,7 +5,10 @@ privileged food state and no belt bowl position — under geometric domain rando
 
 ## Setup
 
-- Env: `FoodRobot-Cell-v0`, Franka, rigid food, 50 Hz control, staged dense reward (unchanged).
+- Env: `FoodRobot-Cell-v0`, Franka, rigid food, 50 Hz control, staged dense reward. One change during run 1:
+  `reach_food`'s shaping width went from 0.1 m to 0.3 m after the first sanity run showed it was flat at the arm's
+  start pose (~0.005 at the ~0.48 m the gripper starts from, while the action and velocity penalties contributed
+  ~10x more, so the return fell for all 41 iterations). Weights, staged structure and penalties are unchanged.
 - Observations (actor and critic): `proprio` + `pixels` (`overview_rgb`, `wrist_rgb`), 3 stacked frames each.
 - Networks: separate actor and critic; per-camera CNN (32/64/64, 8/4/3, strides 4/2/1 → 256), proprio →
   Linear 128 + LayerNorm + ELU, fusion MLP 512-256; TanhNormal actor.
@@ -80,3 +83,37 @@ correctly reported as `skipped_memory` — 1024 and 2048 envs at both image size
 crossed the kill threshold.
 
 ![Benchmark](benchmark/benchmark.png)
+
+## Sanity run
+
+The 45-minute sanity run is the gate before the long run. The first attempt crashed at iteration 41 of 364 with a
+`KeyError` inside `compute_advantage`: TorchRL's `ValueEstimatorBase._sanitize_next_obs_nan` substitutes the NaN
+terminal observations (which `IsaacLabWrapper(native_autoreset=True)` writes by design) on a *shallow copy*, so a
+GAE chunk containing an episode boundary came back without `state_value` while the other kept it, and `torch.cat`
+rejected the mismatched key sets. Fixed in `369996b`, with a regression test that reproduces the exact asymmetry.
+
+That run also showed the reach reward was flat at the start pose, which is why `reach_food`'s width was widened
+(see Setup). The second sanity run reached `PPO_DONE` and wrote checkpoints and an evaluation video:
+`episode_reward/reach_food` rose from 0 to a 0.25 peak (against 7.6e-05 before the change) and the deterministic
+evaluation return reached +2.4, while the training return still showed large negative excursions because each
+tipped bowl costs −150 and the policy had begun reaching the belt (bowl-tipped 10.2% of episodes by the end).
+Success was still 0% and `grasp_lift` still 0 at 2.8 M frames — 1.4% of the training budget.
+
+## Long run
+
+- Budget: 200 million env frames (~47 h at the measured 4.27 M frames/hour); early stop once the training success
+  rate is at least 85% in 10 consecutive iterations. The policy is saved as `checkpoints/ppo_pixels_final.pt`
+  before the run ends, whatever ends it — budget, early stop, `max_hours`, SIGTERM or an exception.
+- Started: 2026-09-16 08:34 UTC, container `food-robot-20260916-103456` on the DGX Spark, Hydra run directory
+  `outputs/2026-09-16/08-34-57/`. Estimated end without early stop: 2026-09-18 ~07:20 UTC.
+- W&B: https://wandb.ai/sebastian-dittert/food_robot/runs/vophimmg
+- Config: `sota-implementations/ppo/config_pixels.yaml` at commit `a29a2fc` (512 envs, 84 px, 3 stacked frames,
+  rollout 16, mini-batch 4096, 24,414 iterations).
+- Status: running. At iteration 769 (6.3 M frames, 1.6 h): return +3.31, `reach_food` 0.316, bowl-tipped 0.0 in
+  that iteration, `grasp_lift` still 0.0, success 0.0, 54.9 GB of 121 GB, five evaluations, no errors.
+- Stop it gracefully (finishes the iteration, saves the final checkpoint):
+
+      ssh spark 'docker exec food-robot-20260916-103456 pkill -TERM -f "kit/python/bin/python3.* ppo_pixels.py"'
+
+  `docker stop` does not work: Isaac Sim's `python.sh` starts Python without `exec`, so SIGTERM reaches the bash
+  wrapper and is never forwarded.

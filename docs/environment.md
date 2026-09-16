@@ -185,7 +185,8 @@ The randomization ranges used for the first pixel PPO run are drawn to scale in
 | `frame_stack` | `1` | camera frames stacked along channels per pixel observation (3 → H×W×9, oldest first); history resets per env |
 | `privileged_information` | `False` | add the simulation-only `privileged` group |
 | `ingredient_bowl_pos` | `(0.45, -0.10, 0.0)` | nominal ingredient bowl position (spawn pose; z is used at every reset) |
-| `ingredient_bowl_x_range` / `ingredient_bowl_y_range` | `(0.35, 0.55)` / `(-0.20, 0.00)` | reset randomization of the ingredient bowl position (cell frame); validated against arm reach and belt clearance |
+| `ingredient_bowl_x_range` / `ingredient_bowl_y_range` | `(0.45, 0.45)` / `(-0.10, -0.10)` | reset randomization of the ingredient bowl position (cell frame); degenerate (fixed) by default as of task 14 -- see "Supply tray" below. Validated against arm reach and belt clearance whenever non-degenerate |
+| `supply_bowl` | `BowlGeometry(inner_radius=0.11, wall_height=0.015)` | ingredient container geometry; separate from `belt.bowl` as of task 14 -- see "Supply tray" below |
 | `overview_cam_eye` / `overview_cam_target` | `(1.5, 0.1, 1.0)` / `(0.3, 0.1, 0.3)` | overview camera placement: in front of the table facing the robot head-on, centered between the ingredient bowl and the belt |
 | `render_camera` | `False` | spawn `scene.render_cam`, a wide third-person camera for videos; not an observation, so the TorchRL specs don't change (the app must be launched with cameras enabled) |
 | `render_cam_eye` / `render_cam_target` | `(2.3, -1.9, 1.9)` / `(0.3, 0.0, 0.35)` | render camera placement (whole cell in view) |
@@ -212,7 +213,7 @@ The randomization ranges used for the first pixel PPO run are drawn to scale in
 | `pallet_start_range` | `(-0.08, 0.08)` m | pallet joint position at reset (0 = belt entry); shifts when the bowl arrives: ~6.9 s (earliest) to ~4.4 s (latest) until it leaves the zone at 0.08 m/s |
 | `plate_top_z` | `0.03` m | pallet surface height |
 | `pallet_damping` | `1e4` | velocity-drive gain of the pallet joint |
-| `bowl` | `BowlGeometry()` | inner radius 7 cm, wall 5 cm, mass 0.2 kg |
+| `bowl` | `BowlGeometry()` | inner radius 7 cm, wall 5 cm, mass 0.2 kg -- the **destination** bowl on the belt. Kept deep and narrow deliberately; the ingredient container is `FoodCellEnvCfg.supply_bowl`, a separate geometry as of task 14 (see "Supply tray" below) |
 | `pallet` | `PalletGeometry()` | size `(0.22, 0.26, 0.01)` m, mass 2.0 kg, `travel_lower=-0.12`, `travel_upper=1.0` m — the prismatic joint's travel range along the belt; `travel_lower` must be ≤ `pallet_start_range[0]`. `travel_upper` must be ≥ `zone.length + entry_margin + 0.1` (the env raises `ValueError` otherwise), so the pallet can never run out of travel before the safety-cap `time_out`. |
 
 The env raises `ValueError` if the zone endpoints are outside `arm.reach_radius`.
@@ -233,14 +234,52 @@ by `FoodCellEnvCfg._build_events` / `_build_observations` (each term is `copy.de
 | `dynamic_friction_range` | `(0.5, 1.0)` | randomized once at startup per env |
 | `restitution_range` | `(0.0, 0.1)` | randomized once at startup per env |
 | `mass_scale_range` | `(0.7, 1.3)` | mass scale, randomized once at startup per env |
-| `spawn_range` | `0.02` m | ± xy food spawn randomization around the ingredient bowl center, applied by the `reset_food` event |
+| `spawn_range` | `0.06` m | ± xy food spawn randomization around the ingredient bowl center, applied by the `reset_food` event. Raised from 0.02 in task 14 alongside the wider, fixed supply tray -- see "Supply tray" below |
 
 Raised in task 13 from `(0.3, 1.0)` / `(0.2, 0.8)`: the fingers otherwise spawn with no material of their
 own and take PhysX's 0.5/0.5 default (see `ArmCfg.finger_friction` below), and with the combine mode unset
 (averaged), the old range's low end left the effective dynamic coefficient as low as ~0.35 against a smooth
-4 cm sphere gripped by flat pads. `scripts/probe_grasp.py --friction_sweep` measured slip vs. food friction
-from 0.3 to 1.4 at the arm's default `finger_friction`; see task-13-report.md for the numbers and a caveat
-below the arm table about what the sweep could and couldn't establish.
+4 cm sphere gripped by flat pads. Those values were chosen before the grasp was physically possible at all
+(task 13's own probe never got the gripper to the food -- see "Supply tray" below), so they were unvalidated
+guesses. Task 14's friction sweep (`scripts/probe_grasp.py friction_sweep=0.3,0.6,1.0,1.4`), run once the
+grasp actually worked, is the first one that measures anything real; see task-14-report.md for the table and
+verdict on whether `(1.2, 1.0)` / `(0.6, 1.2)` / `(0.5, 1.0)` are justified.
+
+### Supply tray (fixed in task 14; was mis-diagnosed as a reach limit in task 13)
+
+The scripted grasp used to fail 0% of the time, and the previous agent's conclusion ("kinematically
+unreachable") was wrong. task-13-debug-report.md measured two independent, stacked defects:
+
+1. **The probe never commanded end-effector orientation** (`scripts/probe_grasp.py`'s `action[:, 3:6]` stayed
+   zero). In relative-mode IK a zero rotation command means "do not correct", and the Franka's reset pose is
+   ~44 deg off top-down, so the whole descent happened diagonally -- driving `panda_joint6` into its
+   3.7525 rad hardware limit a few cm short of the food. This looked like a workspace limit but was not: task
+   14 fixes it in the probe by computing, every control step, the axis-angle rotation that would align the
+   hand's approach axis with straight down and feeding it back as the rotation command (see
+   `_topdown_axis_angle_error` in `scripts/probe_grasp.py`); the debug report measured that this alone drops
+   q6's peak to ~2.85 rad.
+2. **The old ingredient bowl's rim was taller than the food.** With `inner_radius=0.07`/`wall_height=0.05`,
+   the rim top sat at z=0.056 while the food's top was only at z=0.046 -- 1 cm higher. Even a perfectly
+   vertical gripper bottomed its hand on the rim about 0.7 mm above the sphere's equator, closed on the
+   widest point, and squeezed the food out sideways. This was the *hand body* fouling the rim, not the
+   fingers fouling the wall (measured 2.2 cm of radial clearance for the fingers) -- widening the bowl alone,
+   without lowering the rim, would not have fixed it.
+
+Fix 1 is necessary but not sufficient by itself (it reaches the food but still can't grip it past the rim);
+task 14 does both together:
+
+- `FoodCellEnvCfg.supply_bowl: BowlGeometry(inner_radius=0.11, wall_height=0.015)` is a new, separate
+  geometry used only for `scene.ingredient_bowl` and the food's spawn height. `belt.bowl` (the destination
+  bowl on the belt) is untouched -- the two containers no longer share one `BowlGeometry` instance, which is
+  also what let the bowl widen without tripping `validate_bowl_on_pallet` (that check is about the
+  destination bowl's fit on the pallet, and never sees `supply_bowl`).
+- The ingredient bowl's position is now fixed (`ingredient_bowl_x_range`/`_y_range` default to a single
+  point, `(0.45, 0.45)`/`(-0.10, -0.10)`); the food is instead randomized inside the wider tray
+  (`RigidFoodCfg.spawn_range` raised 0.02 -> 0.06 m), covering a comparable xy spread while removing one DR
+  axis from the container itself. The range fields are kept (not collapsed to plain floats) so container
+  position DR can be switched back on later.
+- The food is now green (`(0.15, 0.60, 0.20)`, was brown `(0.55, 0.27, 0.07)`), which separates it from the
+  white robot, off-white bowls and grey table far better at low camera resolutions.
 
 ### `ArmCfg` (Franka defaults)
 
@@ -254,18 +293,6 @@ below the arm table about what the sweep could and couldn't establish.
 | `finger_friction` | `(1.2, 1.0)` (static, dynamic) | applied to `gripper_body_names` by the `gripper_material` startup event (task 13); without it the fingers inherit PhysX's 0.5/0.5 default |
 | `reach_radius` | `0.80` m | used for belt-zone validation |
 | `ik_action_scale` / `joint_action_scale` | `0.5` / `0.5` | action scaling |
-
-**Known limitation (task 13):** the friction sweep above could not establish that friction is sufficient to
-lift the food, because the scripted probe's arm never got the gripper close enough to the food to attempt a
-grasp at all, at any friction value. Driving the TCP down to the food's resting height inside the ingredient
-bowl (spawned near `ingredient_bowl_pos`, close to the arm base) repeatably pins `panda_joint6` at its
-hardware limit (3.7525 rad, the real Panda's documented joint-6 maximum) a few cm short of the food, mostly
-in height; this reproduced identically across a lower/higher hover approach and several tried
-re-orientations, and identically across the whole friction sweep (0% lift and near-identical trajectories at
-every value from 0.3 to 1.4). This looks like a genuine arm-reach/IK-redundancy limitation at this pick
-location, independent of the friction/reward-gating fix in this task -- see task-13-report.md for the full
-diagnosis and the raw traces. It is not yet known whether a policy (with full orientation control) or a
-better scripted approach can avoid it, or whether the ingredient bowl needs to move further from the base.
 
 Adding an arm: create an `ArmCfg` with the arm's articulation configs, joint/body names, TCP offset and
 wrist camera mount, and register it in `food_robot/config.py`. Observation and action specs follow

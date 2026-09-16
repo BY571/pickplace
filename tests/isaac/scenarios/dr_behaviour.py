@@ -1,4 +1,5 @@
-"""Geometric DR: supply bowl position, food spawn inside it, pallet start shift, bowl placement on the pallet."""
+"""Geometric DR: supply bowl position (fixed by default, task 14), food spawn inside it, pallet start shift,
+bowl placement on the pallet."""
 
 import sys
 

@@ -22,8 +22,13 @@ class RigidFoodCfg(FoodSourceCfg):
     name: str = "rigid_sphere"
     item_radius: float = 0.02
     mass: float = 0.03
-    static_friction_range: tuple[float, float] = (0.3, 1.0)
-    dynamic_friction_range: tuple[float, float] = (0.2, 0.8)
+    static_friction_range: tuple[float, float] = (0.6, 1.2)
+    dynamic_friction_range: tuple[float, float] = (0.5, 1.0)
+    """Raised from (0.3, 1.0) / (0.2, 0.8) in task 13: against the fingers' own ``finger_friction`` (default
+    1.2/1.0 static/dynamic, PhysX's averaging combine mode), the old range's lower end left the effective
+    dynamic coefficient as low as ~0.35 -- too slippery to lift a smooth 4 cm sphere gripped by flat pads.
+    See scripts/probe_grasp.py's friction sweep (task-13-report.md) for the measured slip-vs-friction curve
+    that justifies this range."""
     restitution_range: tuple[float, float] = (0.0, 0.1)
     mass_scale_range: tuple[float, float] = (0.7, 1.3)
     spawn_range: float = 0.02
@@ -41,7 +46,7 @@ class RigidFoodCfg(FoodSourceCfg):
                 ),
                 mass_props=sim_utils.MassPropertiesCfg(mass=self.mass),
                 collision_props=CollisionPropertiesCfg(),
-                physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.8, dynamic_friction=0.6),
+                physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=0.9, dynamic_friction=0.7),
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.55, 0.27, 0.07)),
             ),
             init_state=RigidObjectCfg.InitialStateCfg(),

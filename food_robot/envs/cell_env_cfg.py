@@ -152,6 +152,9 @@ class EventCfg:
     )
     reset_belt = EventTerm(func=mdp.reset_belt, mode="reset", params={})  # params set by _build_belt_terms
     reset_ingredient_bowl = EventTerm(func=mdp.reset_ingredient_bowl, mode="reset", params={})  # params set by _build_food_terms
+    gripper_material = EventTerm(
+        func=base_mdp.randomize_rigid_body_material, mode="startup", params={}
+    )  # params (asset_cfg, friction ranges) set by _build_events from arm.gripper_body_names/finger_friction
     # reset_food is contributed by the food plug-in (see FoodSourceCfg.events / RigidFoodCfg) and merged
     # in via _build_events(); it is appended after the fields above, so it always runs after reset_all and
     # reset_ingredient_bowl.
@@ -415,7 +418,19 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             obs.privileged = None
 
     def _build_events(self) -> None:
-        self.events.reset_robot_joints.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=self.arm.arm_joint_names)
+        arm = self.arm
+        self.events.reset_robot_joints.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=arm.arm_joint_names)
+        static_friction, dynamic_friction = arm.finger_friction
+        self.events.gripper_material.params = {
+            # fresh SceneEntityCfg (never shared, see the note in _build_food_terms): a body-level resolution
+            # must not collide with the joint-level SceneEntityCfg instances built for the gripper action/obs.
+            "asset_cfg": SceneEntityCfg("robot", body_names=arm.gripper_body_names),
+            "static_friction_range": (static_friction, static_friction),
+            "dynamic_friction_range": (dynamic_friction, dynamic_friction),
+            "restitution_range": (0.0, 0.0),
+            "num_buckets": 1,
+            "make_consistent": True,
+        }
         # deepcopy: a single food cfg instance (and its term objects) may build multiple envs.
         for name, term in self.food.events.items():
             setattr(self.events, name, copy.deepcopy(term))
@@ -473,8 +488,11 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         }
         hover = bowl.base_thickness + bowl.wall_height + self.food.item_radius + 0.03
         self.rewards.grasp_lift.params.update(grip_params())
-        self.rewards.transport.params.update(hover_height=hover, **grip_params())
-        self.rewards.transport_fine.params.update(hover_height=hover, **grip_params())
+        # transport/transport_fine share grasp_lift's lift_height so the three staged terms agree on what
+        # "holding it" means (see rewards.transport_to_bowl's docstring for why this gate exists).
+        lift_height = self.rewards.grasp_lift.params["lift_height"]
+        self.rewards.transport.params.update(hover_height=hover, lift_height=lift_height, **grip_params())
+        self.rewards.transport_fine.params.update(hover_height=hover, lift_height=lift_height, **grip_params())
         # one-shot terms: undo Isaac Lab's step_dt scaling so the return changes by exactly the bonus/penalty
         self.rewards.place_success.weight = self.success_bonus / step_dt
         self.rewards.bowl_failure.weight = -self.bowl_failure_penalty / step_dt

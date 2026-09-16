@@ -135,7 +135,7 @@ changes by exactly the configured bonus/penalty.
 |---|---|---|
 | `reach_food` | 1 | `1 − tanh(‖tcp − food‖ / 0.3)` |
 | `grasp_lift` | 5 | food grasped and above z = 0.10 |
-| `transport` | 10 | while grasped: `1 − tanh(‖food − above(bowl)‖ / 0.3)` (moving target) |
+| `transport` | 10 | while grasped **and** held above z = 0.10 (same `lift_height` as `grasp_lift`): `1 − tanh(‖food − above(bowl)‖ / 0.3)` (moving target) |
 | `transport_fine` | 5 | same with σ = 0.05 |
 | `place_success` | +`success_bonus` (150) once | success termination |
 | `bowl_failure` | −`bowl_failure_penalty` (150) once | bowl off belt or tipped |
@@ -155,6 +155,13 @@ Reward weights can be overridden per-term through the `rewards: {term_name: weig
 after construction; see below) — except the one-shot terms `place_success`, `bowl_failure` and
 `food_dropped`, which are configured through `success_bonus` / `bowl_failure_penalty` / `food_drop_penalty`
 instead and are rejected (`KeyError`) if passed in `rewards`.
+
+`transport`/`transport_fine` used to pay out on `grasped_mask` alone (food near the TCP, fingers stopped
+between open and closed), with no lift required. Run 1 (27.8 M frames, see
+`docs/experiments/ppo_pixels_run1/`) exploited this: the policy shepherded the food between its fingers on
+the table to farm the weight-10 `transport` term instead of actually lifting it, and `grasp_lift` never rose
+above noise. Task 13 gates both terms on the same `held = grasped & (food_z > lift_height)` condition
+`grasp_lift` already used, so a non-grasp pays nothing.
 
 ## Parameters
 
@@ -222,22 +229,43 @@ by `FoodCellEnvCfg._build_events` / `_build_observations` (each term is `copy.de
 |---|---|---|
 | `item_radius` | `0.02` m | sphere radius |
 | `mass` | `0.03` kg | nominal mass |
-| `static_friction_range` | `(0.3, 1.0)` | randomized once at startup per env |
-| `dynamic_friction_range` | `(0.2, 0.8)` | randomized once at startup per env |
+| `static_friction_range` | `(0.6, 1.2)` | randomized once at startup per env |
+| `dynamic_friction_range` | `(0.5, 1.0)` | randomized once at startup per env |
 | `restitution_range` | `(0.0, 0.1)` | randomized once at startup per env |
 | `mass_scale_range` | `(0.7, 1.3)` | mass scale, randomized once at startup per env |
 | `spawn_range` | `0.02` m | ± xy food spawn randomization around the ingredient bowl center, applied by the `reset_food` event |
+
+Raised in task 13 from `(0.3, 1.0)` / `(0.2, 0.8)`: the fingers otherwise spawn with no material of their
+own and take PhysX's 0.5/0.5 default (see `ArmCfg.finger_friction` below), and with the combine mode unset
+(averaged), the old range's low end left the effective dynamic coefficient as low as ~0.35 against a smooth
+4 cm sphere gripped by flat pads. `scripts/probe_grasp.py --friction_sweep` measured slip vs. food friction
+from 0.3 to 1.4 at the arm's default `finger_friction`; see task-13-report.md for the numbers and a caveat
+below the arm table about what the sweep could and couldn't establish.
 
 ### `ArmCfg` (Franka defaults)
 
 | Parameter | Default | Description |
 |---|---|---|
 | `arm_joint_names` / `gripper_joint_names` | `panda_joint.*` / `panda_finger_joint.*` | joint regexes |
+| `gripper_body_names` | `["panda_leftfinger", "panda_rightfinger"]` | rigid bodies the `gripper_material` startup event applies `finger_friction` to |
 | `ee_body_name` | `panda_hand` | end-effector body |
 | `tcp_offset` | `(0, 0, 0.1034)` | tool center point offset |
 | `gripper_open` / `gripper_closed` | `0.04` / `0.0` | finger joint targets |
+| `finger_friction` | `(1.2, 1.0)` (static, dynamic) | applied to `gripper_body_names` by the `gripper_material` startup event (task 13); without it the fingers inherit PhysX's 0.5/0.5 default |
 | `reach_radius` | `0.80` m | used for belt-zone validation |
 | `ik_action_scale` / `joint_action_scale` | `0.5` / `0.5` | action scaling |
+
+**Known limitation (task 13):** the friction sweep above could not establish that friction is sufficient to
+lift the food, because the scripted probe's arm never got the gripper close enough to the food to attempt a
+grasp at all, at any friction value. Driving the TCP down to the food's resting height inside the ingredient
+bowl (spawned near `ingredient_bowl_pos`, close to the arm base) repeatably pins `panda_joint6` at its
+hardware limit (3.7525 rad, the real Panda's documented joint-6 maximum) a few cm short of the food, mostly
+in height; this reproduced identically across a lower/higher hover approach and several tried
+re-orientations, and identically across the whole friction sweep (0% lift and near-identical trajectories at
+every value from 0.3 to 1.4). This looks like a genuine arm-reach/IK-redundancy limitation at this pick
+location, independent of the friction/reward-gating fix in this task -- see task-13-report.md for the full
+diagnosis and the raw traces. It is not yet known whether a policy (with full orientation control) or a
+better scripted approach can avoid it, or whether the ingredient bowl needs to move further from the base.
 
 Adding an arm: create an `ArmCfg` with the arm's articulation configs, joint/body names, TCP offset and
 wrist camera mount, and register it in `food_robot/config.py`. Observation and action specs follow

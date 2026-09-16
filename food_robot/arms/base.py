@@ -18,6 +18,10 @@ class ArmCfg:
     """Articulation with stiffer gains used with differential-IK actions."""
     arm_joint_names: list[str] = MISSING
     gripper_joint_names: list[str] = MISSING
+    gripper_body_names: list[str] = MISSING
+    """Rigid body names the fingers spawn as, used to apply ``finger_friction`` (e.g. via a startup
+    ``randomize_rigid_body_material`` event); distinct from ``gripper_joint_names``, which drives the gripper
+    action and observations."""
     base_link_name: str = MISSING
     ee_body_name: str = MISSING
     tcp_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -30,3 +34,8 @@ class ArmCfg:
     """Conservative horizontal reach from the base, used to validate the belt zone."""
     joint_action_scale: float = 0.5
     ik_action_scale: float = 0.5
+    finger_friction: tuple[float, float] = (1.2, 1.0)
+    """(static, dynamic) friction applied to ``gripper_body_names`` by the env's ``gripper_material`` startup
+    event. Without this, the fingers spawn with no material of their own and inherit PhysX's 0.5/0.5 default,
+    which (combine mode unset, i.e. averaged against the food's material) is too slippery to lift a smooth
+    sphere gripped by flat pads -- see task-13-grasp-fix.md."""

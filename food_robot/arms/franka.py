@@ -45,6 +45,7 @@ FRANKA_CFG = ArmCfg(
     ik_robot=_with_legacy_usd(FRANKA_PANDA_HIGH_PD_CFG).replace(prim_path="{ENV_REGEX_NS}/Robot"),
     arm_joint_names=["panda_joint.*"],
     gripper_joint_names=["panda_finger_joint.*"],
+    gripper_body_names=["panda_leftfinger", "panda_rightfinger"],
     base_link_name="panda_link0",
     ee_body_name="panda_hand",
     tcp_offset=(0.0, 0.0, 0.1034),

@@ -109,14 +109,18 @@ Success was still 0% and `grasp_lift` still 0 at 2.8 M frames — 1.4% of the tr
 - W&B: https://wandb.ai/sebastian-dittert/food_robot/runs/vophimmg
 - Config: `sota-implementations/ppo/config_pixels.yaml` at commit `a29a2fc` (512 envs, 84 px, 3 stacked frames,
   rollout 16, mini-batch 4096, 24,414 iterations).
-- Status: running. At iteration 769 (6.3 M frames, 1.6 h): return +3.31, `reach_food` 0.316, bowl-tipped 0.0 in
-  that iteration, `grasp_lift` still 0.0, success 0.0, 54.9 GB of 121 GB, five evaluations, no errors.
-- Stop it gracefully (finishes the iteration, saves the final checkpoint):
+- Status: **stopped deliberately at 27,779,072 frames** (iteration ~3385, 7.2 h) once the diagnosis below was
+  conclusive — `STOP_REASON {"reason": "sigterm"}`, `PPO_DONE`, and `checkpoints/ppo_pixels_final.pt` written, so
+  the crash-safety wrapper's exit path is confirmed working. The run reached `reach_food` 0.482 and rising, with
+  `grasp_lift` ~0, `transport` 0.308 and no successes; see the two top rows of the improvements table.
+- Stop a run gracefully (finishes the iteration, saves the final checkpoint):
 
-      ssh spark 'docker exec food-robot-20260916-103456 pkill -TERM -f "kit/python/bin/python3.* ppo_pixels.py"'
+      ssh spark 'docker exec <container> pkill -TERM -f "kit/python/bin/python3.*ppo_pixels.py"'
 
-  `docker stop` does not work: Isaac Sim's `python.sh` starts Python without `exec`, so SIGTERM reaches the bash
-  wrapper and is never forwarded.
+  Note there is no space before `ppo_pixels.py`: the command line is `.../python3 sota-implementations/ppo/ppo_pixels.py`,
+  so a pattern ending in `" ppo_pixels.py"` matches nothing and the run keeps going. `docker stop` does not work
+  either: Isaac Sim's `python.sh` starts Python without `exec`, so SIGTERM reaches the bash wrapper (PID 1) and is
+  never forwarded — and signalling that wrapper would kill the container before the checkpoint is written.
 
 ## Improvements for the next run
 

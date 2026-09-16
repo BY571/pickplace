@@ -133,7 +133,7 @@ changes by exactly the configured bonus/penalty.
 
 | Term | Weight | Signal |
 |---|---|---|
-| `reach_food` | 1 | `1 − tanh(‖tcp − food‖ / 0.1)` |
+| `reach_food` | 1 | `1 − tanh(‖tcp − food‖ / 0.3)` |
 | `grasp_lift` | 5 | food grasped and above z = 0.10 |
 | `transport` | 10 | while grasped: `1 − tanh(‖food − above(bowl)‖ / 0.3)` (moving target) |
 | `transport_fine` | 5 | same with σ = 0.05 |

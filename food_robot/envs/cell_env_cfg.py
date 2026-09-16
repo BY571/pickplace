@@ -159,7 +159,7 @@ class EventCfg:
 
 @configclass
 class RewardsCfg:
-    reach_food = RewTerm(func=mdp.reach_food, weight=1.0, params={"std": 0.1})
+    reach_food = RewTerm(func=mdp.reach_food, weight=1.0, params={"std": 0.3})
     grasp_lift = RewTerm(func=mdp.grasp_lift, weight=5.0, params={"lift_height": 0.10})
     transport = RewTerm(func=mdp.transport_to_bowl, weight=10.0, params={"std": 0.3})
     transport_fine = RewTerm(func=mdp.transport_to_bowl, weight=5.0, params={"std": 0.05})

@@ -19,7 +19,7 @@ env:
     bowl_offset_y: [-0.04, 0.04]
   # Fixed as of task 14 (was [0.35, 0.55] / [-0.20, 0.00]): the supply tray is wide, shallow and fixed;
   # the food is randomized inside it instead (RigidFoodCfg.spawn_range, default 0.06 m). See
-  # docs/environment.md's "Known limitation (task 13)" note and task-14-report.md.
+  # docs/environment.md's "Supply tray" section.
   ingredient_bowl_x_range: [0.45, 0.45]
   ingredient_bowl_y_range: [-0.10, -0.10]
   rewards: {}
@@ -70,7 +70,7 @@ loss:
 reward_scale: 0.1            # applied to rewards used for GAE/loss only; logged returns are unscaled
 
 eval:
-  interval_iterations: 136   # benchmark: deterministic evaluation (0 disables)
+  interval_iterations: 610   # ~every 5 M frames at 8192 frames/iteration (run 1 used 136, ~1.1 M: ~8% of wall-clock); 0 disables
   video_interval_evals: 2    # log eval/policy_view every N evaluations (0 disables)
   video_upscale: 2
 

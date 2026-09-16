@@ -28,9 +28,12 @@ REPO = Path(__file__).resolve().parents[1]
 PPO_DIR = REPO / "sota-implementations" / "ppo"
 FRAME_STACK = 3
 MEMORY_FRACTION = 0.8
-MAX_UPDATE_SHARE = 0.5
+# Both measured B rows spend ~69% of each iteration in the PPO update (two CNN encoders, 4 epochs), so the old
+# 0.5 guard would reject every configuration; the real objective is frames/hour and memory, not update share.
+MAX_UPDATE_SHARE = 0.8
 EVAL_TIME_SHARE = 0.1
-MEM_FACTOR = 4.0  # training memory per collected batch, relative to one float32 copy (see training_estimate_gb)
+MEM_FACTOR = 10.5  # training memory per collected batch, relative to one float32 copy (see training_estimate_gb)
+KILL_FRACTION = 0.85  # kill a measured run above this share of total memory, before the host OOM killer acts
 TIMEOUT_S = 1800
 TOTAL_FRAMES = 1_000_000_000  # training budget of the long run (config_pixels.yaml collector.total_frames)
 FULL = {"num_envs": [128, 256, 512, 1024, 2048], "images": [84, 128], "env_steps": 300,
@@ -91,19 +94,35 @@ def worker(kw):
 
 
 def run_measured(cmd, cwd, log_path):
-    """Run cmd, sampling peak system memory; returns (status, stdout lines, peak used GB)."""
+    """Run cmd, sampling peak system memory; returns (status, stdout lines, peak used GB).
+
+    A run that crosses KILL_FRACTION of total memory is killed here. The estimate in
+    ``training_estimate_gb`` keeps hopeless configurations from starting, but it is only an estimate: when one
+    slips through, the kernel OOM killer takes down dbus/containerd and the whole machine with it (observed
+    twice). Killing the child ourselves keeps the host alive and records the configuration as aborted_memory.
+    """
+    total_gb = memory_gb()[0]
+    kill_above = KILL_FRACTION * total_gb
     peak = {"used": memory_gb()[1]}
+    killed = threading.Event()
     stop = threading.Event()
+    proc = None  # assigned below; the sampler thread starts only after Popen returns
 
     def sample():
         while not stop.is_set():
-            peak["used"] = max(peak["used"], memory_gb()[1])
+            used = memory_gb()[1]
+            peak["used"] = max(peak["used"], used)
+            if used > kill_above:
+                killed.set()
+                print(f"[benchmark] memory guard: {used:.0f} GB > {kill_above:.0f} GB, killing the run", flush=True)
+                proc.kill()
+                return
             time.sleep(0.5)
 
-    sampler = threading.Thread(target=sample, daemon=True)
-    sampler.start()
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             env={**os.environ, "OMNI_KIT_ACCEPT_EULA": "YES"})
+    sampler = threading.Thread(target=sample, daemon=True)
+    sampler.start()
     timed_out = threading.Event()
     watchdog = threading.Timer(TIMEOUT_S, lambda: (timed_out.set(), proc.kill()))
     watchdog.start()
@@ -116,7 +135,12 @@ def run_measured(cmd, cwd, log_path):
     watchdog.cancel()
     stop.set()
     sampler.join()
-    status = "timeout" if timed_out.is_set() else ("ok" if proc.returncode == 0 else f"exit{proc.returncode}")
+    if killed.is_set():
+        status = "aborted_memory"
+    elif timed_out.is_set():
+        status = "timeout"
+    else:
+        status = "ok" if proc.returncode == 0 else f"exit{proc.returncode}"
     return status, lines, peak["used"]
 
 
@@ -163,25 +187,32 @@ def training_estimate_gb(peak_a_gb: float, n: int, image: int, rollout: int) -> 
     """Phase-A peak plus the memory a full PPO iteration adds for one collected batch.
 
     The collector holds the batch twice (root and "next") as float32; GAE, the uint8 buffer copy and the
-    minibatch forward/backward add more. MEM_FACTOR is calibrated against the observed failure: 2048 envs
-    at 84 px with rollout 16 (batch 15.5 GB, Phase-A peak 49 GB) exhausted all 121 GB of the Spark.
+    minibatch forward/backward add more. MEM_FACTOR is calibrated against the measured row: 1024 envs at 84 px,
+    rollout 16 has a 7.75 GB float batch and a 30.4 GB Phase-A peak, yet peaked at 111.7 GB — an increment of
+    ~10.5x the batch.
     """
     batch_gb = n * rollout * 2 * image * image * 3 * FRAME_STACK * 4 / 1024**3
     return peak_a_gb + MEM_FACTOR * batch_gb
 
 
-def phase_b(grid, rows_a, out, total_gb, csv_path):
+def phase_b(grid, rows_a, existing_b, out, total_gb, csv_path):
+    """Run Phase B, skipping any candidate already measured in ``existing_b`` (resume after a crash/hang)."""
     budget = MEMORY_FRACTION * total_gb
     fitting = [r for r in rows_a if r["status"] == "ok" and float(r["peak_used_gb"]) < budget]
     best = sorted(fitting, key=lambda r: -float(r["env_steps_per_s"]))
-    rows = []
+    measured = {r["name"] for r in existing_b}
+    rows = list(existing_b)  # keep already-measured rows in the output; write_csv must never drop them
     for base in best:
         n, image, peak_a = int(base["num_envs"]), int(base["image"]), float(base["peak_used_gb"])
         feasible = [
             r for r in grid["rollout_steps"] if training_estimate_gb(peak_a, n, image, r) < budget
         ]
         if not feasible:
-            rows.append({"phase": "B", "name": f"B_n{n}_i{image}", "num_envs": n, "image": image,
+            name = f"B_n{n}_i{image}"
+            if name in measured:
+                print(f"[benchmark] keeping measured {name}", flush=True)
+                continue
+            rows.append({"phase": "B", "name": name, "num_envs": n, "image": image,
                          "frame_stack": FRAME_STACK, "status": "skipped_memory",
                          "peak_used_gb": round(training_estimate_gb(peak_a, n, image, min(grid["rollout_steps"])), 1)})
             print(f"[benchmark] skipping n={n} i={image}: estimated training memory exceeds {budget:.0f} GB", flush=True)
@@ -194,6 +225,9 @@ def phase_b(grid, rows_a, out, total_gb, csv_path):
         for rollout in feasible:
             for mini_batch in grid["mini_batches"]:
                 name = f"B_n{n}_i{image}_r{rollout}_m{mini_batch}"
+                if name in measured:
+                    print(f"[benchmark] keeping measured {name}", flush=True)
+                    continue
                 print(f"[benchmark] {name}", flush=True)
                 cmd = [sys.executable, "ppo_pixels.py", f"env.num_envs={n}", f"env.image_size=[{image},{image}]",
                        f"env.frame_stack={FRAME_STACK}", f"collector.rollout_steps={rollout}",
@@ -225,7 +259,7 @@ def phase_b(grid, rows_a, out, total_gb, csv_path):
 
 
 def select(rows_b, total_gb):
-    ok = [r for r in rows_b if r["status"] == "ok" and r["peak_used_gb"] < MEMORY_FRACTION * total_gb
+    ok = [r for r in rows_b if r["status"] == "ok" and float(r["peak_used_gb"]) < MEMORY_FRACTION * total_gb
           and float(r["update_share"]) <= MAX_UPDATE_SHARE]
     if not ok:
         return None
@@ -330,6 +364,11 @@ def main():
         print("BENCHMARK_DONE", flush=True)
         return
 
+    existing_b = []
+    if csv_path.exists():
+        with open(csv_path) as f:
+            existing_b = [r for r in csv.DictReader(f) if r["phase"] == "B"]
+
     rows = []
     if "A" in phases:
         rows = phase_a(grid, out, csv_path)
@@ -340,7 +379,7 @@ def main():
         rows_a = [r for r in rows if r["phase"] == "A"]
         for r in rows_a:
             r["peak_used_gb"] = float(r["peak_used_gb"])
-        rows += phase_b(grid, rows_a, out, total_gb, csv_path)
+        rows += phase_b(grid, rows_a, existing_b, out, total_gb, csv_path)
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")

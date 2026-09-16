@@ -39,7 +39,7 @@ network:
 
 collector:
   rollout_steps: 16          # benchmark
-  total_frames: 1_000_000_000  # training budget in env frames (also the LR annealing horizon)
+  total_frames: 200_000_000  # ~45 h at the benchmarked 4.44 M frames/hour (also the LR annealing horizon)
 
 max_iterations: null         # overrides total_frames when set
 max_hours: null              # stop cleanly (final checkpoint) after this much wall time

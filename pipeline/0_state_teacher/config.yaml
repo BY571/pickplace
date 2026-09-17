@@ -66,6 +66,15 @@ reward_scale: 0.1            # applied to the reward used for GAE/loss only; log
 checkpoint:
   interval_frames: 10_000_000  # 0 disables periodic checkpoints (the final one is always written)
 
+worker:                      # background evaluation + video of every checkpoint (separate Isaac Sim process)
+  enabled: true
+  eval_num_envs: 256         # envs in the deterministic evaluation (cameras off)
+  render: true
+  render_seconds: 12
+  render_image: 128          # student camera size shown in the video
+  on_exit: true              # evaluate/render the final checkpoint before exiting
+  exit_timeout_s: 3600
+
 logger:
   backend: wandb             # wandb | csv | tensorboard | null
   project_name: food_robot

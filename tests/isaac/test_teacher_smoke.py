@@ -20,7 +20,14 @@ def _lines(stdout, prefix):
 
 
 def _train(tmp_path, *overrides, timeout=2400):
-    env = {**os.environ, "OMNI_KIT_ACCEPT_EULA": "YES", "FOOD_ROBOT_ARTIFACTS": str(tmp_path / "artifacts")}
+    env = {
+        **os.environ,
+        "OMNI_KIT_ACCEPT_EULA": "YES",
+        "FOOD_ROBOT_ARTIFACTS": str(tmp_path / "artifacts"),
+        "WANDB_MODE": "offline",
+        "WANDB_DIR": str(tmp_path),
+        "WANDB_SILENT": "true",
+    }
     args = [
         str(TRAIN),
         f"env.num_envs={N}",
@@ -39,7 +46,9 @@ def _train(tmp_path, *overrides, timeout=2400):
 
 
 def test_teacher_trains_logs_terms_and_writes_checkpoints_with_manifests(tmp_path):
-    proc, tail = _train(tmp_path, f"max_iterations={ITERATIONS}", "checkpoint.interval_frames=3000")
+    proc, tail = _train(
+        tmp_path, f"max_iterations={ITERATIONS}", "checkpoint.interval_frames=3000", "worker.enabled=false"
+    )
     assert "PPO_DONE" in proc.stdout, tail
 
     metrics = _lines(proc.stdout, "METRICS ")
@@ -70,10 +79,31 @@ def test_teacher_trains_logs_terms_and_writes_checkpoints_with_manifests(tmp_pat
 
 def test_teacher_early_stop_saves_final_checkpoint(tmp_path):
     proc, tail = _train(
-        tmp_path, "max_iterations=40", "checkpoint.interval_frames=0",
+        tmp_path, "max_iterations=40", "checkpoint.interval_frames=0", "worker.enabled=false",
         "early_stop.success_rate=0.0", "early_stop.consecutive_iterations=2",
     )
     assert "PPO_DONE" in proc.stdout, tail
     assert _lines(proc.stdout, "STOP_REASON ")[-1]["reason"] == "early_stop"
     assert len(_lines(proc.stdout, "METRICS ")) < 40
     assert (tmp_path / "run" / "checkpoints" / "ppo_teacher_final.pt").exists()
+
+
+def test_worker_evaluates_and_renders_every_checkpoint(tmp_path):
+    proc, tail = _train(
+        tmp_path, "max_iterations=6", "checkpoint.interval_frames=1500",
+        "worker.enabled=true", "worker.eval_num_envs=16", "worker.render_seconds=3",
+        "logger.backend=wandb", timeout=3600,
+    )
+    assert "PPO_DONE" in proc.stdout, tail
+    ckpts = sorted((tmp_path / "run" / "checkpoints").glob("ppo_teacher_*.pt"))
+    assert {p.stem for p in ckpts} >= {"ppo_teacher_1536", "ppo_teacher_3072", "ppo_teacher_final"}
+    for p in ckpts:
+        m = json.loads(p.with_suffix(".json").read_text())
+        assert m["eval"] is not None, (p.name, tail)
+        assert 0.0 <= m["eval"]["success_rate"] <= 1.0 and m["eval"]["finished_fraction"] > 0
+        assert "terms/reach_food" in m["eval"] and m["eval_num_envs"] == 16
+        assert m["video"] == f"{p.stem}.mp4" and (p.parent / m["video"]).stat().st_size > 0
+    worker_log = (tmp_path / "run" / "worker.log").read_text()
+    assert "EVALUATE_DONE" in worker_log and "RENDER_DONE" in worker_log
+    metrics = _lines(proc.stdout, "EVAL_LOGGED ")
+    assert {m["checkpoint_frames"] for m in metrics} >= {1536, 3072}

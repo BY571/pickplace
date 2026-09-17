@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import math
+import shlex
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -13,7 +16,7 @@ from torch import nn
 from torchrl.envs import ExplorationType
 from torchrl.modules import MLP, ProbabilisticActor, TanhNormal, ValueOperator
 
-from food_robot.artifacts import git_commit, sha256_file, write_json
+from food_robot.artifacts import git_commit, read_json, sha256_file, write_json
 from food_robot.keys import expand_in_keys
 
 
@@ -127,3 +130,59 @@ def save_teacher_checkpoint(run_dir, name: str, actor, critic, optim, cfg, frame
         },
     )
     return path
+
+
+HERE = Path(__file__).resolve().parent
+
+
+class CheckpointWorker:
+    """Evaluates and renders a run's checkpoints in a background process while training continues.
+
+    One pass = ``evaluate.py run=<run_dir>`` then ``render.py all=<run_dir>``; both skip checkpoints whose
+    manifest already has an ``eval`` / ``video``, so a pass started later catches up on everything missed while
+    the previous pass was busy. Output is appended to ``<run_dir>/worker.log``.
+    """
+
+    def __init__(self, run_dir, worker_cfg):
+        self.run_dir = Path(run_dir)
+        self.cfg = worker_cfg
+        self.proc: subprocess.Popen | None = None
+        self._reported: set[tuple[str, str]] = set()
+
+    def running(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def launch(self) -> bool:
+        """Start a pass unless one is running; returns whether a pass was started."""
+        if self.running():
+            return False
+        python = shlex.quote(sys.executable)
+        run = shlex.quote(str(self.run_dir))
+        commands = [f"{python} {shlex.quote(str(HERE / 'evaluate.py'))} run={run} num_envs={int(self.cfg.eval_num_envs)}"]
+        if self.cfg.render:
+            commands.append(
+                f"{python} {shlex.quote(str(HERE / 'render.py'))} all={run} "
+                f"seconds={float(self.cfg.render_seconds)} image={int(self.cfg.render_image)}"
+            )
+        log = open(self.run_dir / "worker.log", "a")  # noqa: SIM115 - handed to the child process
+        self.proc = subprocess.Popen(["bash", "-c", "; ".join(commands)], stdout=log, stderr=subprocess.STDOUT)
+        log.close()
+        return True
+
+    def wait(self, timeout_s: float) -> None:
+        if self.running():
+            try:
+                self.proc.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                print(f"[worker] still running after {timeout_s:.0f} s; leaving it", flush=True)
+
+    def new_results(self) -> list[tuple[str, dict]]:
+        """(``"eval"`` | ``"video"``, checkpoint manifest) for results not reported before, oldest first."""
+        results = []
+        manifests = [read_json(p) for p in (self.run_dir / "checkpoints").glob("ppo_teacher_*.json")]
+        for m in sorted(manifests, key=lambda m: m["frames"]):
+            for kind in ("eval", "video"):
+                if m.get(kind) is not None and (m["checkpoint"], kind) not in self._reported:
+                    self._reported.add((m["checkpoint"], kind))
+                    results.append((kind, m))
+        return results

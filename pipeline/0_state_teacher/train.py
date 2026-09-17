@@ -104,48 +104,78 @@ def main(cfg: DictConfig):
         flush=True,
     )
 
-    actor, critic = tu.make_teacher_models(env, cfg.network, device)
-    collector = Collector(
-        env,
-        actor,
-        frames_per_batch=frames_per_batch,
-        total_frames=-1,
-        device=device,
-        no_cuda_sync=True,
-        trust_policy=True,
-    )
-    buffer = TensorDictReplayBuffer(
-        storage=LazyTensorStorage(frames_per_batch, device=device),
-        sampler=SamplerWithoutReplacement(),
-        batch_size=mini_batch_size,
-    )
-    adv_module = GAE(
-        gamma=cfg.loss.gamma, lmbda=cfg.loss.gae_lambda, value_network=critic, average_gae=False, device=device
-    )
-    loss_module = ClipPPOLoss(
-        actor_network=actor,
-        critic_network=critic,
-        clip_epsilon=cfg.loss.clip_epsilon,
-        entropy_coeff=cfg.loss.entropy_coeff,
-        critic_coeff=cfg.loss.critic_coeff,
-        normalize_advantage=True,
-    )
-    optim = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr, eps=1e-5)
-
-    logger = None
-    if cfg.logger.backend:
-        logger = get_logger(
-            cfg.logger.backend,
-            logger_name=str(run_dir / "logs"),
-            experiment_name=generate_exp_name("StateTeacher", cfg.logger.exp_name),
-            wandb_kwargs={
-                "config": OmegaConf.to_container(cfg, resolve=True),
-                "project": cfg.logger.project_name,
-                "group": cfg.logger.group,
-            },
+    try:
+        actor, critic = tu.make_teacher_models(env, cfg.network, device)
+        collector = Collector(
+            env,
+            actor,
+            frames_per_batch=frames_per_batch,
+            total_frames=-1,
+            device=device,
+            no_cuda_sync=True,
+            trust_policy=True,
         )
-        if cfg.logger.backend == "wandb":
-            update_json(manifest_path, wandb_url=logger.experiment.url)
+        buffer = TensorDictReplayBuffer(
+            storage=LazyTensorStorage(frames_per_batch, device=device),
+            sampler=SamplerWithoutReplacement(),
+            batch_size=mini_batch_size,
+        )
+        adv_module = GAE(
+            gamma=cfg.loss.gamma, lmbda=cfg.loss.gae_lambda, value_network=critic, average_gae=False, device=device
+        )
+        loss_module = ClipPPOLoss(
+            actor_network=actor,
+            critic_network=critic,
+            clip_epsilon=cfg.loss.clip_epsilon,
+            entropy_coeff=cfg.loss.entropy_coeff,
+            critic_coeff=cfg.loss.critic_coeff,
+            normalize_advantage=True,
+        )
+        optim = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr, eps=1e-5)
+
+        logger = None
+        if cfg.logger.backend:
+            logger = get_logger(
+                cfg.logger.backend,
+                logger_name=str(run_dir / "logs"),
+                experiment_name=generate_exp_name("StateTeacher", cfg.logger.exp_name),
+                wandb_kwargs={
+                    "config": OmegaConf.to_container(cfg, resolve=True),
+                    "project": cfg.logger.project_name,
+                    "group": cfg.logger.group,
+                },
+            )
+            if cfg.logger.backend == "wandb":
+                update_json(manifest_path, wandb_url=logger.experiment.url)
+    except BaseException as error:  # noqa: BLE001 - a failed setup must not leave the manifest open
+        # Without this the run's manifest would keep stop_reason/ended_at null forever (no final
+        # checkpoint either), and the worker tooling would read the run as still training.
+        update_json(
+            manifest_path,
+            stop_reason=f"error: {type(error).__name__}",
+            ended_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+        raise
+
+    worker = tu.CheckpointWorker(run_dir, cfg.worker) if cfg.worker.enabled else None
+
+    def log_worker_results(metrics: dict, step: int) -> None:
+        """Merge finished checkpoint evaluations into ``metrics``; upload finished videos."""
+        if worker is None:
+            return
+        for kind, manifest in worker.new_results():
+            if kind == "eval":
+                metrics.update({f"eval/{k}": v for k, v in manifest["eval"].items()})
+                metrics["eval/checkpoint_frames"] = manifest["frames"]
+                print("EVAL_LOGGED " + json.dumps({"checkpoint_frames": manifest["frames"], **manifest["eval"]}), flush=True)
+            elif logger is not None and cfg.logger.backend == "wandb":
+                import wandb
+
+                video = run_dir / "checkpoints" / manifest["video"]
+                logger.experiment.log(
+                    {"eval/video": wandb.Video(str(video), format="mp4"), "eval/video_checkpoint_frames": manifest["frames"]},
+                    step=step,
+                )
 
     checkpoints: list[str] = []
 
@@ -223,7 +253,7 @@ def main(cfg: DictConfig):
                     group["lr"] = cfg.optim.lr * (1.0 - (iteration + 1) / total_iterations)
             collector.update_policy_weights_()
 
-            # [task5: checkpoint results]
+            log_worker_results(metrics, frames_total)
             print("METRICS " + json.dumps({"frames": frames_total, **metrics}), flush=True)
             if logger is not None:
                 for key, value in metrics.items():
@@ -231,7 +261,8 @@ def main(cfg: DictConfig):
             pbar.update(1)
             if interval and frames_total // interval > frames_before // interval:
                 save(f"ppo_teacher_{frames_total}", frames_total, iteration)
-                # [task5: after periodic checkpoint]
+                if worker is not None and not worker.launch():
+                    print("[worker] previous pass still running; this checkpoint is picked up by the next pass", flush=True)
             if early_stop_on and early_stop_reached:
                 stop["reason"] = "early_stop"
                 break
@@ -243,7 +274,15 @@ def main(cfg: DictConfig):
         stop_info = {"reason": stop["reason"], "frames": frames_total, "success_streak": success_streak.count}
         print("STOP_REASON " + json.dumps(stop_info), flush=True)
         collector.shutdown()
-        # [task5: after final checkpoint]
+        if worker is not None and cfg.worker.on_exit:
+            worker.wait(cfg.worker.exit_timeout_s)  # finish the running pass, then one pass for the final checkpoint
+            worker.launch()
+            worker.wait(cfg.worker.exit_timeout_s)
+            final = {}
+            log_worker_results(final, frames_total)
+            if logger is not None:
+                for key, value in final.items():
+                    logger.log_scalar(key, value, step=frames_total)
         update_json(
             manifest_path,
             stop_reason=stop["reason"],

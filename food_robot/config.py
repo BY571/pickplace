@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import dataclasses
 import importlib
 from collections.abc import Mapping
 
 ARMS = {"franka": "food_robot.arms.franka:FRANKA_CFG"}
 FOODS = {"rigid": "food_robot.food.rigid:RigidFoodCfg"}
-
-# One-shot reward terms already encode their bonus/penalty in `weight` (scaled to cancel Isaac Lab's
-# step_dt multiplication, see FoodCellEnvCfg._build_food_terms) and are configured through the
-# dedicated success_bonus / bowl_failure_penalty / food_drop_penalty fields instead.
-ONE_SHOT_REWARD_TERMS = {"place_success", "bowl_failure", "food_dropped"}
 
 DEFAULT_ENV: dict = {
     "task": "FoodRobot-Cell-v0",
@@ -27,9 +21,10 @@ DEFAULT_ENV: dict = {
     "belt": {},
     "seed": 0,
     "device": "cuda:0",
-    "success_bonus": 150.0,
-    "bowl_failure_penalty": 150.0,
-    "food_drop_penalty": 150.0,
+    # Legacy one-shot keys: None defers to the reward set (see food_robot.rewards.resolve_reward_weights).
+    "success_bonus": None,
+    "bowl_failure_penalty": None,
+    "food_drop_penalty": None,
     "success_settle_steps": 5,
     "ingredient_bowl_pos": [0.45, -0.10, 0.0],
     # Fixed as of task 14 (was [0.35, 0.55] / [-0.20, 0.00]): the food is randomized inside the wider supply
@@ -44,6 +39,8 @@ DEFAULT_ENV: dict = {
     "render_cam_target": [0.3, 0.0, 0.35],
     "render_image_size": [720, 1280],
     "rewards": {},
+    "reward_set": "staged_v1",
+    "reward_weights": {},
     "food_params": {},
 }
 
@@ -71,31 +68,17 @@ def _geometry_kwargs(belt_kwargs: dict) -> dict:
     return out
 
 
-def _apply_rewards(cfg, rewards: Mapping) -> None:
-    if not rewards:
-        return
-    valid = {f.name for f in dataclasses.fields(cfg.rewards)}
-    for name, weight in rewards.items():
-        if name in ONE_SHOT_REWARD_TERMS:
-            raise KeyError(
-                f"Reward term {name!r} is a one-shot bonus/penalty term; its weight already encodes "
-                "the bonus/penalty via the success_bonus/bowl_failure_penalty/food_drop_penalty env "
-                "config fields, not via `rewards`."
-            )
-        if name not in valid:
-            raise KeyError(f"Unknown reward term {name!r}. Valid terms: {sorted(valid)}")
-        getattr(cfg.rewards, name).weight = float(weight)
-
-
 def build_cell_env_cfg(env_cfg: Mapping):
     """Merge ``env_cfg`` over ``DEFAULT_ENV`` and construct the Isaac Lab env config."""
     from food_robot.belt import BeltCfg
     from food_robot.envs.cell_env_cfg import FoodCellEnvCfg
+    from food_robot.rewards import DENSE_TERMS, isaac_weight, resolve_reward_weights
 
     unknown = set(env_cfg) - set(DEFAULT_ENV)
     if unknown:
         raise ValueError(f"Unknown env config keys {sorted(unknown)}. Allowed: {sorted(DEFAULT_ENV)}")
     c = {**DEFAULT_ENV, **env_cfg}
+    weights = resolve_reward_weights(c)
     arm = _resolve(ARMS, c["arm"], "arm")
     food_cls = _resolve(FOODS, c["food"], "food")
     food = food_cls(**_tuples(c["food_params"]))
@@ -109,9 +92,9 @@ def build_cell_env_cfg(env_cfg: Mapping):
         image_size=tuple(c["image_size"]),
         frame_stack=int(c["frame_stack"]),
         privileged_information=bool(c["privileged_information"]),
-        success_bonus=float(c["success_bonus"]),
-        bowl_failure_penalty=float(c["bowl_failure_penalty"]),
-        food_drop_penalty=float(c["food_drop_penalty"]),
+        success_bonus=weights["success"],
+        bowl_failure_penalty=-weights["bowl_failure"],
+        food_drop_penalty=-weights["food_dropped"],
         success_settle_steps=int(c["success_settle_steps"]),
         ingredient_bowl_pos=tuple(c["ingredient_bowl_pos"]),
         ingredient_bowl_x_range=tuple(c["ingredient_bowl_x_range"]),
@@ -126,5 +109,8 @@ def build_cell_env_cfg(env_cfg: Mapping):
     cfg.scene.num_envs = int(c["num_envs"])
     cfg.seed = c["seed"]
     cfg.sim.device = c["device"]
-    _apply_rewards(cfg, c["rewards"])
+    for term in DENSE_TERMS:
+        # Isaac Lab keeps computing every dense term (non-zero weight) so the reward-term vector can recover
+        # the unweighted value; the training reward itself comes from LineariseRewards in make_env.
+        getattr(cfg.rewards, term).weight = isaac_weight(weights[term])
     return cfg

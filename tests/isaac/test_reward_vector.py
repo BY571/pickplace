@@ -1,0 +1,23 @@
+import pytest
+
+pytestmark = pytest.mark.isaac
+
+
+def test_reward_vector_reproduces_isaac_lab_reward_and_specs(run_scenario):
+    r = run_scenario("reward_vector")
+    assert r["check_env_specs"] == "ok"
+    assert r["reward_terms_shape"] == [16, 11]
+    assert r["done_rows"] > 0, "rollout must include episode ends"
+    # the TorchRL linearised reward equals Isaac Lab's own scalar, step by step
+    assert r["max_abs_reward_diff"] < 1e-4
+    # event components are 0/1 and only non-zero on done rows
+    assert r["events_binary"] and r["events_only_on_done"]
+    # episode_reward_terms sums the vector (checked on non-done rows, where the running sum is valid)
+    assert r["max_abs_term_sum_diff"] < 1e-3
+
+
+def test_reward_set_switch_changes_the_scalar_only(run_scenario):
+    r = run_scenario("reward_vector", "--sparse")
+    assert r["check_env_specs"] == "ok"
+    # success-only weights: the scalar reward is exactly success_weight * success component
+    assert r["max_abs_sparse_diff"] < 1e-6

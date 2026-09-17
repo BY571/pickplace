@@ -155,10 +155,29 @@ nothing instead costs only the tiny regularization terms. `food_robot/envs/cell_
 full anti-exploit argument next to the three constants, and asks you to re-check it whenever `belt.speed`,
 `belt.speed_noise`, `belt.place_window` or the dense reward weights change.
 
-Reward weights can be overridden per-term through the `rewards: {term_name: weight}` env config (applied
-after construction; see below) — except the one-shot terms `place_success`, `bowl_failure` and
-`food_dropped`, which are configured through `success_bonus` / `bowl_failure_penalty` / `food_drop_penalty`
-instead and are rejected (`KeyError`) if passed in `rewards`.
+### Reward-term vector and reward sets
+
+`make_env` exposes every reward term, unweighted, as `("next", "reward_terms")` (shape `(N, 11)`) in
+`food_robot.rewards.REWARD_TERMS` order: the dense terms `reach_food`, `grasp`, `grasp_lift`, `transport`,
+`transport_fine`, `bowl_disturbance`, `action_rate`, `joint_vel` (component = term value × dt, recovered from
+Isaac Lab's reward manager) followed by the event terms `success`, `bowl_failure`, `food_dropped` (0/1, only
+non-zero on the done row of an episode that ended that way, taken from `("next", "outcome", ...)`; `success`
+is the Isaac Lab term `place_success`).
+
+The training reward `("next", "reward")` is TorchRL's `LineariseRewards` over that vector: a weighted sum with
+one weight per term. Weights come from a named reward set, `food_robot/reward_sets/<name>.yaml`, selected by
+`env.reward_set` (default `staged_v1`, the table above) and overridden per term with
+`env.reward_weights: {term: weight}` (e.g. the CLI override `env.reward_weights.food_dropped=-10.0`). Dense weights are reward per second the term is held; event weights
+are the one-shot bonus (positive) or penalty (negative). The legacy keys still work and resolve to the same
+reward as before: `rewards` (dense terms only) and `success_bonus` / `bowl_failure_penalty` /
+`food_drop_penalty` (when not null; penalties become negative weights), with `reward_weights` applied last
+(`food_robot.torchrl_env.reward_weights(env_cfg)` returns the final weights). Isaac Lab itself keeps a
+non-zero weight on every dense term (a zero-weight term would be skipped and vanish from the vector), so its
+own logged `Episode_Reward/*` stats need not match the linearised reward when a set zeroes a term.
+
+Besides `episode_reward` (running sum of `reward`), `episode_reward_terms` is the per-term running sum of the
+vector. Both reset on the done row under native auto-reset, so a finished episode's total is
+`data["episode_reward_terms"] + data["next", "reward_terms"]`.
 
 `transport`/`transport_fine` used to pay out on `grasped_mask` alone (food near the TCP, fingers stopped
 between open and closed), with no lift required. Run 1 (27.8 M frames, see
@@ -316,13 +335,15 @@ future Nucleus or `isaaclab_assets` change is caught instead of silently ignored
 `build_cell_env_cfg` (used by `make_env` and every `sota-implementations/*` Hydra config's `env:` section)
 merges a plain mapping over `DEFAULT_ENV` and builds the `FoodCellEnvCfg` above. In addition to the
 constructor kwargs it forwards directly (`num_envs`, `arm`, `food`, `action_mode`, `cameras`, `image_size`,
-`privileged_information`, `success_bonus`, `bowl_failure_penalty`, `food_drop_penalty`,
-`success_settle_steps`, `ingredient_bowl_pos`, `overview_cam_eye`, `overview_cam_target`, `belt`, `seed`,
-`device`), it accepts:
+`privileged_information`, `success_settle_steps`, `ingredient_bowl_pos`, `overview_cam_eye`,
+`overview_cam_target`, `belt`, `seed`, `device`), it accepts:
 
 | Key | Meaning |
 |---|---|
-| `rewards` | `{term_name: weight}`, applied to `cfg.rewards.<term_name>.weight` after construction. Unknown term names raise `KeyError` listing the valid terms; the one-shot terms `place_success`, `bowl_failure`, `food_dropped` raise `KeyError` if passed here (use `success_bonus`/`bowl_failure_penalty`/`food_drop_penalty` instead). |
+| `reward_set` | Name of a reward set in `food_robot/reward_sets/` (or a path to a YAML file); default `staged_v1`. |
+| `reward_weights` | `{term: weight}` overrides over the reward set; unknown term names raise `KeyError`. |
+| `rewards` | Legacy: `{dense_term: weight}` overrides. Unknown or non-dense names (e.g. `place_success`) raise `KeyError`. |
+| `success_bonus` / `bowl_failure_penalty` / `food_drop_penalty` | Legacy: when not null, set the `success` weight to `+value` and the `bowl_failure` / `food_dropped` weights to `-value`. |
 | `food_params` | Forwarded as constructor kwargs to the food plug-in class (e.g. `{"spawn_range": 0.03, "mass": 0.04}` for `RigidFoodCfg`). |
 | `belt.bowl` / `belt.pallet` | Nested dicts, turned into `BowlGeometry(**belt.bowl)` / `PalletGeometry(**belt.pallet)` before constructing `BeltCfg`, e.g. `{"belt": {"pallet": {"travel_upper": 2.0}}}`. |
 

@@ -1,0 +1,79 @@
+# Stage 0 — privileged state teacher (PPO from robot state + bowl pose + food pose; cameras off).
+# Values marked "benchmark" are set by Task 6 from docs/experiments/pipeline_stage0/benchmark.
+env:
+  task: FoodRobot-Cell-v0
+  num_envs: 4096             # benchmark
+  arm: franka
+  food: rigid
+  action_mode: ee_delta_pose
+  cameras: false
+  privileged_information: true
+  belt:                      # same scene and DR as pixel PPO run 3
+    speed: 0.08
+    speed_noise: 0.0
+    place_window: 5.0
+    pallet_start_range: [-0.08, 0.08]
+    bowl_offset_x: [-0.02, 0.02]
+    bowl_offset_y: [-0.04, 0.04]
+  ingredient_bowl_x_range: [0.45, 0.45]
+  ingredient_bowl_y_range: [-0.10, -0.10]
+  reward_set: staged_v1      # food_robot/reward_sets/<name>.yaml
+  reward_weights:            # per-run overrides on top of the set
+    food_dropped: -10.0      # carried over from pixel run 3: at -150 one knocked-off ball outweighed an episode of reaching
+  food_params: {}
+  seed: 0
+  device: cuda:0
+
+app:
+  headless: true
+
+run:
+  dir: null                  # null: $FOOD_ROBOT_ARTIFACTS/teachers/<name>
+  name: null                 # null: teachers_<UTC timestamp>
+
+network:
+  actor_in_keys: [proprio, belt, privileged]
+  critic_in_keys: [proprio, belt, privileged]
+  hidden: [512, 256, 128]
+
+collector:
+  rollout_steps: 24          # benchmark
+  total_frames: 200_000_000  # also the LR annealing horizon
+
+max_iterations: null         # overrides total_frames when set
+max_hours: null              # stop cleanly (final checkpoint) after this much wall time
+
+early_stop:
+  success_rate: 0.85         # stop once the training success rate reaches this for
+  consecutive_iterations: 10 # this many iterations in a row; success_rate: null disables
+
+optim:
+  lr: 3.0e-4
+  anneal_lr: true
+  max_grad_norm: 1.0
+
+loss:
+  gamma: 0.99
+  gae_lambda: 0.95
+  ppo_epochs: 4
+  mini_batch_size: 32768     # benchmark
+  clip_epsilon: 0.2
+  entropy_coeff: 0.005
+  critic_coeff: 0.5
+
+reward_scale: 0.1            # applied to the reward used for GAE/loss only; logged returns are unscaled
+
+checkpoint:
+  interval_frames: 10_000_000  # 0 disables periodic checkpoints (the final one is always written)
+
+logger:
+  backend: wandb             # wandb | csv | tensorboard | null
+  project_name: food_robot
+  group: pipeline_teacher
+  exp_name: state_teacher
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/pipeline_teacher/${now:%Y-%m-%d_%H-%M-%S}

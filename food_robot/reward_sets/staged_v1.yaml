@@ -1,0 +1,14 @@
+# staged_v1 — the staged dense reward used by pixel PPO runs 1-3 (with the `grasp` stepping stone).
+# Dense weights are reward per second the term is held (components are value x dt); event weights are the
+# one-shot bonus/penalty applied on the step an episode ends that way.
+reach_food: 1.0
+grasp: 2.0
+grasp_lift: 5.0
+transport: 10.0
+transport_fine: 5.0
+bowl_disturbance: -1.0
+action_rate: -1.0e-4
+joint_vel: -1.0e-4
+success: 150.0
+bowl_failure: -150.0
+food_dropped: -150.0

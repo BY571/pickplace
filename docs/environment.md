@@ -167,7 +167,9 @@ is the Isaac Lab term `place_success`).
 The training reward `("next", "reward")` is TorchRL's `LineariseRewards` over that vector: a weighted sum with
 one weight per term. Weights come from a named reward set, `food_robot/reward_sets/<name>.yaml`, selected by
 `env.reward_set` (default `staged_v1`, the table above) and overridden per term with
-`env.reward_weights: {term: weight}` (e.g. the CLI override `env.reward_weights.food_dropped=-10.0`). Dense weights are reward per second the term is held; event weights
+`env.reward_weights: {term: weight}` (e.g. the CLI override `+env.reward_weights.food_dropped=-10.0` — the
+`+` is required because the `sota-implementations/ppo` configs do not define the key, and Hydra's struct mode
+rejects adding an absent key without it). Dense weights are reward per second the term is held; event weights
 are the one-shot bonus (positive) or penalty (negative). The legacy keys still work and resolve to the same
 reward as before: `rewards` (dense terms only) and `success_bonus` / `bowl_failure_penalty` /
 `food_drop_penalty` (when not null; penalties become negative weights), with `reward_weights` applied last

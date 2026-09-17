@@ -278,7 +278,8 @@ task 14 does both together:
   (`RigidFoodCfg.spawn_range` raised 0.02 -> 0.06 m), covering a comparable xy spread while removing one DR
   axis from the container itself. The range fields are kept (not collapsed to plain floats) so container
   position DR can be switched back on later.
-- The food is now green (`(0.15, 0.60, 0.20)`, was brown `(0.55, 0.27, 0.07)`), which separates it from the
+- The food is now a deep green (`(0.02, 0.28, 0.05)`; brown `(0.55, 0.27, 0.07)` before task 14, and a lighter
+  `(0.15, 0.60, 0.20)` during run 2, which rendered as a pale mint against the white tray), which separates it from the
   white robot, off-white bowls and grey table far better at low camera resolutions.
 
 ### `ArmCfg` (Franka defaults)

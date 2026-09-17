@@ -55,7 +55,7 @@ class RigidFoodCfg(FoodSourceCfg):
                 # Green (task 14): the scene is a white robot, off-white bowls and a grey table, so green
                 # separates the food from everything else far better than the old brown, especially at
                 # 84x84-128x128 px.
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.15, 0.60, 0.20)),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.02, 0.28, 0.05)),
             ),
             init_state=RigidObjectCfg.InitialStateCfg(),
         )

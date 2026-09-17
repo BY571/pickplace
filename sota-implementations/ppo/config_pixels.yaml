@@ -22,6 +22,9 @@ env:
   # docs/environment.md's "Supply tray" section.
   ingredient_bowl_x_range: [0.45, 0.45]
   ingredient_bowl_y_range: [-0.10, -0.10]
+  # Run 3 (was the 150 env default): on the shallow supply tray a bumped ball rolls off easily, and at 150
+  # a single drop outweighed all the reaching reward a policy could earn in an episode (see run 2 review).
+  food_drop_penalty: 10.0
   rewards: {}
   food_params: {}
   seed: 0
@@ -53,14 +56,14 @@ early_stop:
                              # success_rate: null disables
 
 optim:
-  lr: 3.0e-4
+  lr: 1.0e-4          # run 3 (was 3.0e-4): run 2's KL rose 0.006->0.015 and clip fraction 0.08->0.18 at 3e-4
   anneal_lr: true
   max_grad_norm: 1.0
 
 loss:
   gamma: 0.99
   gae_lambda: 0.95
-  ppo_epochs: 4
+  ppo_epochs: 2       # run 3 (was 4): fewer epochs per batch to curb the rising KL/clip fraction from run 2
   mini_batch_size: 4096      # benchmark
   clip_epsilon: 0.2
   entropy_coeff: 0.005

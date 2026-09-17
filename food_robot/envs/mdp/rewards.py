@@ -28,6 +28,17 @@ def reach_food(
     return 1.0 - torch.tanh(distance / std)
 
 
+def grasped(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg,
+    open_pos: float,
+    closed_pos: float,
+    food_cfg: SceneEntityCfg = SceneEntityCfg("food"),
+) -> torch.Tensor:
+    """Fingers closed on the food near the TCP, no lift required: the stepping stone between reach_food and grasp_lift."""
+    return grasped_mask(env, robot_cfg, food_cfg, open_pos=open_pos, closed_pos=closed_pos).float()
+
+
 def grasp_lift(
     env: ManagerBasedRLEnv,
     lift_height: float,

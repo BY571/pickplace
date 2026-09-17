@@ -1,9 +1,10 @@
 """Grasp scenario: reuses scripts/probe_grasp.py's scripted grasp motion (settle -> descend -> close -> lift
 -> hold) at the env's default food/finger friction and reports whether the food came along.
 
-With ``--transport-gate`` it additionally captures the `transport` reward term's value while the food merely
-rests between the fingers on the table (right as the gripper finishes closing) versus while it is lifted
-(right as the hold phase ends) -- the case task 13 closes off (transport used to pay for the former).
+With ``--transport-gate`` it additionally captures the `transport` and `grasp` reward terms' values while the
+food merely rests between the fingers on the table (right as the gripper finishes closing) versus while it
+is lifted (right as the hold phase ends) -- `transport` must pay nothing for the former (the case task 13
+closes off), while `grasp` -- the stepping-stone term added for run 3 -- must pay for it.
 """
 
 import importlib.util

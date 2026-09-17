@@ -112,16 +112,17 @@ def run_grasp_probe(cfg, capture_transport: bool = False) -> dict:
     Returns ``lifted_fraction`` (fraction of envs with final food height > ``LIFTED_HEIGHT``),
     ``max_food_height`` and ``slip_distance`` (mean final ``|food - tcp|``, all across envs at the end of
     the ``hold`` phase). If ``capture_transport``, also returns ``transport_while_resting`` /
-    ``transport_while_lifted``: the ``transport`` reward term's value for each env, captured the instant its
-    own gripper finishes closing (food still resting between the fingers on the table, not yet lifted) and
-    the instant its own ``hold`` phase ends (food lifted), averaged across envs (envs that never reach that
-    instant count as 0, same as the reward they'd actually receive by staying in an earlier phase).
+    ``transport_while_lifted`` and ``grasp_while_resting`` / ``grasp_while_lifted``: the ``transport`` and
+    ``grasp`` reward terms' values for each env, captured the instant its own gripper finishes closing
+    (food still resting between the fingers on the table, not yet lifted) and the instant its own ``hold``
+    phase ends (food lifted), averaged across envs (envs that never reach that instant count as 0, same as
+    the reward they'd actually receive by staying in an earlier phase).
     """
     import gymnasium as gym
     import torch
 
     import food_robot.envs  # noqa: F401
-    from food_robot.envs.mdp.rewards import transport_to_bowl
+    from food_robot.envs.mdp.rewards import grasped, transport_to_bowl
 
     if cfg.action_mode != "ee_delta_pose":
         raise ValueError("run_grasp_probe needs env.action_mode='ee_delta_pose'.")
@@ -131,6 +132,7 @@ def run_grasp_probe(cfg, capture_transport: bool = False) -> dict:
     device, dt, n = u.device, u.step_dt, cfg.scene.num_envs
     action_dim = u.action_manager.total_action_dim
     transport_params = dict(u.reward_manager.get_term_cfg("transport").params) if capture_transport else None
+    grasp_params = dict(u.reward_manager.get_term_cfg("grasp").params) if capture_transport else None
 
     obs, _ = env.reset()
     # phase: 0 settle, 1 align (hover above), 2 descend (straight down), 3 close, 4 lift, 5 hold, 6 done
@@ -140,6 +142,8 @@ def run_grasp_probe(cfg, capture_transport: bool = False) -> dict:
     lift_target = torch.zeros(n, 3, device=device)
     transport_resting = torch.zeros(n, device=device)
     transport_lifted = torch.zeros(n, device=device)
+    grasp_resting = torch.zeros(n, device=device)
+    grasp_lifted = torch.zeros(n, device=device)
 
     debug = bool(os.environ.get("PROBE_DEBUG"))
     debug_idx = int(os.environ.get("PROBE_DEBUG_IDX", "0"))
@@ -205,6 +209,9 @@ def run_grasp_probe(cfg, capture_transport: bool = False) -> dict:
             value = transport_to_bowl(u, **transport_params)
             transport_resting[to_lift] = value[to_lift]
             transport_lifted[to_done] = value[to_done]
+            grasp_value = grasped(u, **grasp_params)
+            grasp_resting[to_lift] = grasp_value[to_lift]
+            grasp_lifted[to_done] = grasp_value[to_done]
 
         for trans, new_phase in (
             (to_align, 1), (to_descend, 2), (to_close, 3), (to_lift, 4), (to_hold, 5), (to_done, 6)
@@ -238,6 +245,8 @@ def run_grasp_probe(cfg, capture_transport: bool = False) -> dict:
     if capture_transport:
         result["transport_while_resting"] = float(transport_resting.mean())
         result["transport_while_lifted"] = float(transport_lifted.mean())
+        result["grasp_while_resting"] = float(grasp_resting.mean())
+        result["grasp_while_lifted"] = float(grasp_lifted.mean())
     env.close()
     return result
 

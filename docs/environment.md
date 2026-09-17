@@ -134,6 +134,7 @@ changes by exactly the configured bonus/penalty.
 | Term | Weight | Signal |
 |---|---|---|
 | `reach_food` | 1 | `1 − tanh(‖tcp − food‖ / 0.3)` |
+| `grasp` | 2 | `grasped_mask` (0/1): fingers closed on the food, no lift needed -- a stepping stone toward `grasp_lift` |
 | `grasp_lift` | 5 | food grasped and above z = 0.10 |
 | `transport` | 10 | while grasped **and** held above z = 0.10 (same `lift_height` as `grasp_lift`): `1 − tanh(‖food − above(bowl)‖ / 0.3)` (moving target) |
 | `transport_fine` | 5 | same with σ = 0.05 |
@@ -193,7 +194,7 @@ The randomization ranges used for the first pixel PPO run are drawn to scale in
 | `render_image_size` | `(720, 1280)` | render camera height, width |
 | `success_bonus` | `150.0` | return added on success |
 | `bowl_failure_penalty` | `150.0` | return subtracted when the bowl falls off or tips |
-| `food_drop_penalty` | `150.0` | return subtracted when the food falls off the table |
+| `food_drop_penalty` | `150.0` | return subtracted when the food falls off the table (the pixel PPO run 3 config overrides this to `10.0` -- see `sota-implementations/ppo/config_pixels.yaml`) |
 | `success_settle_steps` | `5` | consecutive at-rest steps required for success |
 | `scene.num_envs` | `64` | parallel environments |
 

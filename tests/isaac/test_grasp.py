@@ -14,3 +14,5 @@ def test_transport_reward_requires_a_lift(run_scenario):
     r = run_scenario("grasp_probe", "--transport-gate")
     assert r["transport_while_resting"] == 0.0  # fingers around the food on the table pays nothing
     assert r["transport_while_lifted"] > 0.0
+    assert r["grasp_while_resting"] > 0.0  # but the stepping-stone `grasp` term must pay before any lift
+    assert r["grasp_while_lifted"] > 0.0

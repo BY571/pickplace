@@ -164,6 +164,7 @@ class EventCfg:
 @configclass
 class RewardsCfg:
     reach_food = RewTerm(func=mdp.reach_food, weight=1.0, params={"std": 0.3})
+    grasp = RewTerm(func=mdp.grasped, weight=2.0, params={})
     grasp_lift = RewTerm(func=mdp.grasp_lift, weight=5.0, params={"lift_height": 0.10})
     transport = RewTerm(func=mdp.transport_to_bowl, weight=10.0, params={"std": 0.3})
     transport_fine = RewTerm(func=mdp.transport_to_bowl, weight=5.0, params={"std": 0.05})
@@ -224,17 +225,24 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     render_image_size: tuple[int, int] = (720, 1280)
     # Anti-exploit constraint (spec §5.5): each one-shot term below must exceed whatever dense shaping
     # a policy could still earn by deliberately ending the episode early instead of trying, so failing
-    # early is never more profitable than a real attempt. Dense shaping (reach_food, grasp_lift,
+    # early is never more profitable than a real attempt. Dense shaping (reach_food, grasp, grasp_lift,
     # transport, transport_fine) is non-negative by construction, so simply ending the episode sooner
     # never *gains* reward on its own -- the risk is a policy that pays the small per-step
     # regularization cost (action_rate, joint_vel, bowl_disturbance, ~1e-4-1/s) in exchange for a
     # one-shot bonus/penalty. Over a normal zone traversal -- (entry_margin 0.05 + earliest pallet start
     # 0.08 + max bowl offset 0.02 + zone_length 0.40) / belt speed 0.08 ~= 6.9 s -- the maximum dense
-    # shaping obtainable is the sum of the non-one-shot weights (~21/s) * 6.9 s ~= 145, comfortably
-    # below the 150 bonus/penalty. An arm that instead holds the bowl in place (never triggering
-    # bowl_exited_zone) until time_out can extend that window to episode_length_s ~= 10.1 s, collecting
-    # up to ~21/s * 10.1 s ~= 212 -- more than a single one-shot term, but that policy still forgoes the
-    # 150 success_bonus it could have earned by actually placing the food, so it is not the optimum.
+    # shaping obtainable is the sum of the non-one-shot weights, now ~23/s with `grasp`'s weight 2 added
+    # (was ~21/s) * 6.9 s ~= 159 -- slightly *above* the 150 bonus/penalty, so this bound is no longer
+    # comfortable on its own. The invariant it guards still holds, though: dense shaping is non-negative
+    # while the one-shot penalty is strictly -150, so any real attempt (0 <= reward <= ~159) always beats
+    # deliberately failing (-150) regardless of how tight the margin is. An arm that instead holds the
+    # bowl in place (never triggering bowl_exited_zone) until time_out can extend that window to
+    # episode_length_s ~= 10.1 s, collecting up to ~23/s * 10.1 s ~= 232 -- more than a single one-shot
+    # term, but that policy still forgoes the 150 success_bonus it could have earned by actually placing
+    # the food, so it is not the optimum. `grasp`'s own weight (2) is deliberately kept below `grasp_lift`
+    # (5) and `transport` (10) so holding without lifting is always worth less than lifting; taken alone
+    # (ignoring the other terms it can coincide with), over the longest episode (~10 s) it can add at
+    # most ~20, far below the 150 success bonus.
     # Re-check this arithmetic whenever belt.speed, belt.speed_noise, belt.place_window or the dense
     # reward weights change.
     success_bonus: float = 150.0
@@ -502,6 +510,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             **grip_params(),
         }
         hover = bowl.base_thickness + bowl.wall_height + self.food.item_radius + 0.03
+        self.rewards.grasp.params.update(grip_params())
         self.rewards.grasp_lift.params.update(grip_params())
         # transport/transport_fine share grasp_lift's lift_height so the three staged terms agree on what
         # "holding it" means (see rewards.transport_to_bowl's docstring for why this gate exists).

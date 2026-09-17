@@ -96,7 +96,8 @@ def _make_reward_terms_vector():
             names = list(rm.active_terms)
             step_reward = rm._step_reward
             n = step_reward.shape[0]
-            out = torch.zeros(n, len(REWARD_TERMS), device=step_reward.device, dtype=step_reward.dtype)
+            # float32 by construction, matching transform_reward_spec below.
+            out = torch.zeros(n, len(REWARD_TERMS), device=step_reward.device, dtype=torch.float32)
             for k, term in enumerate(DENSE_TERMS):
                 i = names.index(term)
                 out[:, k] = step_reward[:, i] / rm.get_term_cfg(term).weight * u.step_dt
@@ -155,12 +156,14 @@ def make_env(env_cfg: Mapping):
     return TransformedEnv(
         base,
         Compose(
+            # StepCounter first: it is the transform that can *add* a done (max_steps truncation), and the
+            # two transforms below read `done` to decide which rows ended an episode.
+            StepCounter(),
             _make_episode_outcome(OUTCOME_TERMS),
             _make_reward_terms_vector(),
             LineariseRewards(in_keys=["reward_terms"], out_keys=["reward"], weights=weights),
             RewardSum(in_keys=["reward"], out_keys=["episode_reward"]),
             RewardSum(in_keys=["reward_terms"], out_keys=["episode_reward_terms"]),
-            StepCounter(),
         ),
     )
 

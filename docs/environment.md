@@ -173,7 +173,9 @@ reward as before: `rewards` (dense terms only) and `success_bonus` / `bowl_failu
 `food_drop_penalty` (when not null; penalties become negative weights), with `reward_weights` applied last
 (`food_robot.torchrl_env.reward_weights(env_cfg)` returns the final weights). Isaac Lab itself keeps a
 non-zero weight on every dense term (a zero-weight term would be skipped and vanish from the vector), so its
-own logged `Episode_Reward/*` stats need not match the linearised reward when a set zeroes a term.
+own logged `Episode_Reward/*` stats follow those forced weights, not the training ones: under a reward set
+that zeroes a dense term, the `Episode_Reward/*` series for it (e.g. the `reach_food` health signal
+`scripts/plot_training.py` plots) still describes a term the policy is not actually paid for.
 
 Besides `episode_reward` (running sum of `reward`), `episode_reward_terms` is the per-term running sum of the
 vector. Both reset on the done row under native auto-reset, so a finished episode's total is

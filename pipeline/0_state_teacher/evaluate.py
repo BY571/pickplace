@@ -49,10 +49,6 @@ KEYS = ["episode_reward", "episode_reward_terms", "step_count",
         ("next", "done"), ("next", "reward"), ("next", "reward_terms"), ("next", "outcome")]
 
 
-def frames_of(path: Path) -> float:
-    return float("inf") if path.stem.endswith("_final") else int(path.stem.rsplit("_", 1)[-1])
-
-
 def pending(paths):
     return [p for p in paths if force or read_json(p.with_suffix(".json")).get("eval") is None]
 
@@ -60,10 +56,10 @@ def pending(paths):
 if cli.get("checkpoint"):
     todo = [Path(cli.checkpoint)]
 else:
-    todo = sorted(Path(cli.run, "checkpoints").glob("ppo_teacher_*.pt"), key=frames_of)
+    todo = sorted(Path(cli.run, "checkpoints").glob("ppo_teacher_*.pt"), key=tu.frames_of)
 todo = pending(todo)
 
-env = None
+env, empty = None, []
 if todo:
     env_cfg = torch.load(todo[0], map_location="cpu", weights_only=False)["config"]["env"]
     env_cfg = {**env_cfg, "num_envs": num_envs, "cameras": False, "seed": seed}
@@ -84,9 +80,19 @@ for path in todo:
     metrics = first_episode_metrics(torch.stack(records, dim=1), "eval")
     result = {k[len("eval/"):]: v for k, v in metrics.items()}
     seconds = time.monotonic() - t0
+    if not result:
+        # No env finished within max_episode_length + 1 steps -- a timeout bug, not a score. Leave `eval`
+        # null so the next pass retries this checkpoint; writing {} would read as "evaluated" forever.
+        empty.append(path.name)
+        print(
+            "EVAL_EMPTY " + json.dumps({"checkpoint": path.name, "steps": steps, "num_envs": num_envs,
+                                        "seconds": round(seconds, 1), "reason": "no episode finished"}),
+            flush=True,
+        )
+        continue
     update_json(path.with_suffix(".json"), eval=result, eval_num_envs=num_envs, eval_seconds=round(seconds, 1))
     print("EVAL " + json.dumps({"checkpoint": path.name, "seconds": round(seconds, 1), **result}), flush=True)
 
 print("MEMORY " + json.dumps({"used_gb": round(memory_used_gb(), 2), "delta_gb": round(memory_used_gb() - baseline_gb, 2)}), flush=True)
-print(f"EVALUATE_DONE evaluated={len(todo)}", flush=True)
+print(f"EVALUATE_DONE evaluated={len(todo) - len(empty)} empty={len(empty)}", flush=True)
 os._exit(0)  # Isaac Sim shutdown can hang

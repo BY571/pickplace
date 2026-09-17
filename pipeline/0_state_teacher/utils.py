@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import os
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -135,6 +137,12 @@ def save_teacher_checkpoint(run_dir, name: str, actor, critic, optim, cfg, frame
 HERE = Path(__file__).resolve().parent
 
 
+def frames_of(path) -> float:
+    """Sort key for ``ppo_teacher_<frames>.pt``; ``ppo_teacher_final`` sorts last."""
+    stem = Path(path).stem
+    return float("inf") if stem.endswith("_final") else int(stem.rsplit("_", 1)[-1])
+
+
 class CheckpointWorker:
     """Evaluates and renders a run's checkpoints in a background process while training continues.
 
@@ -142,6 +150,8 @@ class CheckpointWorker:
     manifest already has an ``eval`` / ``video``, so a pass started later catches up on everything missed while
     the previous pass was busy. Output is appended to ``<run_dir>/worker.log``.
     """
+
+    GRACE_S = 30.0  # between SIGTERM and SIGKILL when a pass overruns its timeout
 
     def __init__(self, run_dir, worker_cfg):
         self.run_dir = Path(run_dir)
@@ -165,16 +175,61 @@ class CheckpointWorker:
                 f"seconds={float(self.cfg.render_seconds)} image={int(self.cfg.render_image)}"
             )
         log = open(self.run_dir / "worker.log", "a")  # noqa: SIM115 - handed to the child process
-        self.proc = subprocess.Popen(["bash", "-c", "; ".join(commands)], stdout=log, stderr=subprocess.STDOUT)
+        # start_new_session: `bash -c "a; b"` does not exec, so the Isaac Sim children are only reachable
+        # through the process group -- see _signal_group(), used when a pass overruns its timeout.
+        self.proc = subprocess.Popen(
+            ["bash", "-c", "; ".join(commands)], stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+        )
         log.close()
         return True
 
+    def unfinished(self) -> list[str]:
+        """``<checkpoint>(eval,video)`` for every checkpoint still missing a result, oldest first."""
+        kinds = ("eval", "video") if self.cfg.render else ("eval",)
+        out = []
+        for path in sorted((self.run_dir / "checkpoints").glob("ppo_teacher_*.json"), key=frames_of):
+            manifest = read_json(path)
+            missing = [kind for kind in kinds if manifest.get(kind) is None]
+            if missing:
+                out.append(f"{manifest['checkpoint']}({','.join(missing)})")
+        return out
+
+    def _signal_group(self, sig) -> None:
+        """Signal the whole pass (bash plus its Isaac Sim children); never raises."""
+        try:
+            os.killpg(os.getpgid(self.proc.pid), sig)
+        except OSError:  # already gone
+            pass
+
     def wait(self, timeout_s: float) -> None:
-        if self.running():
+        """Wait for the running pass; terminate it if it overruns. Never raises.
+
+        An overrunning pass must not be left behind: an orphaned Isaac Sim process outlives the trainer and
+        collides with the next run (a stale ``/dev/shm`` carb semaphore alone can wedge ``launch_app()`` for
+        tens of minutes). Whatever it did not finish is listed so it can be caught up by hand.
+        """
+        if not self.running():
+            return
+        try:
+            self.proc.wait(timeout=timeout_s)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        print(
+            f"[worker] still running after {timeout_s:.0f} s; terminating it. Not finished: "
+            f"{', '.join(self.unfinished()) or 'nothing'}. Catch up with: "
+            f"evaluate.py run={self.run_dir} && render.py all={self.run_dir}",
+            flush=True,
+        )
+        self._signal_group(signal.SIGTERM)
+        try:
+            self.proc.wait(timeout=self.GRACE_S)
+        except subprocess.TimeoutExpired:
+            self._signal_group(signal.SIGKILL)
             try:
-                self.proc.wait(timeout=timeout_s)
+                self.proc.wait(timeout=self.GRACE_S)
             except subprocess.TimeoutExpired:
-                print(f"[worker] still running after {timeout_s:.0f} s; leaving it", flush=True)
+                print("[worker] the pass survived SIGKILL; leaving it", flush=True)
 
     def new_results(self) -> list[tuple[str, dict]]:
         """(``"eval"`` | ``"video"``, checkpoint manifest) for results not reported before, oldest first."""

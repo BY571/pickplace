@@ -74,14 +74,10 @@ def compose(scene, overview, wrist, caption: str) -> np.ndarray:
     return np.concatenate([top, np.concatenate([panel(overview, "overview_rgb"), panel(wrist, "wrist_rgb")], axis=1)])
 
 
-def frames_of(path: Path) -> float:
-    return float("inf") if path.stem.endswith("_final") else int(path.stem.rsplit("_", 1)[-1])
-
-
 if cli.get("checkpoint"):
     todo = [Path(cli.checkpoint)]
 else:
-    todo = sorted(Path(cli.all, "checkpoints").glob("ppo_teacher_*.pt"), key=frames_of)
+    todo = sorted(Path(cli.all, "checkpoints").glob("ppo_teacher_*.pt"), key=tu.frames_of)
 todo = [p for p in todo if force or read_json(p.with_suffix(".json")).get("video") is None]
 
 env = None

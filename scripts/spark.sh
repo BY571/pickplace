@@ -19,6 +19,9 @@ SPARK_HOST="${SPARK_HOST:-spark}"
 SPARK_DIR="${SPARK_DIR:-~/food-robot}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+GIT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [[ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]]; then GIT_COMMIT="${GIT_COMMIT}-dirty"; fi
+
 HOST_MODE=0
 DETACH_MODE=0
 case "${1:-}" in
@@ -46,7 +49,7 @@ if [[ "$DETACH_MODE" -eq 1 ]]; then
   ssh "$SPARK_HOST" bash -s <<EOF
 set -euo pipefail
 cd $SPARK_DIR
-DOCKER_DETACH=1 DOCKER_NAME=$NAME ./docker/run.sh $CMD
+FOOD_ROBOT_GIT_COMMIT=$GIT_COMMIT DOCKER_DETACH=1 DOCKER_NAME=$NAME ./docker/run.sh $CMD
 EOF
   echo "Started detached container: $NAME"
   echo "Follow logs: ssh $SPARK_HOST docker logs -f $NAME"
@@ -60,5 +63,5 @@ RUN_PREFIX=""
 ssh "$SPARK_HOST" bash -s <<EOF
 set -euo pipefail
 cd $SPARK_DIR
-exec ${RUN_PREFIX}$CMD
+FOOD_ROBOT_GIT_COMMIT=$GIT_COMMIT exec ${RUN_PREFIX}$CMD
 EOF

@@ -14,6 +14,10 @@
 #   DOCKER_NAME=<name> container name; only meaningful with DOCKER_DETACH=1.
 #   WANDB_API_KEY / WANDB_MODE  forwarded into the container when set on the host.
 #   ~/.netrc                    mounted read-only at /root/.netrc when present (W&B credentials).
+#   FOOD_ROBOT_ARTIFACTS_HOST   host dir for pipeline artifacts (default: $HOME/food-robot-artifacts),
+#                                mounted at /workspace/artifacts (container $HOME is ephemeral).
+#   FOOD_ROBOT_GIT_COMMIT       forwarded into the container when set (scripts/spark.sh sets this;
+#                                the container has no .git since the rsync excludes it).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -51,11 +55,20 @@ if [[ -f "$HOME/.netrc" ]]; then
   WANDB_FLAGS+=(-v "$HOME/.netrc:/root/.netrc:ro")
 fi
 
+# Pipeline artifacts (checkpoints, datasets) live outside the repo on the host and are mounted in.
+ARTIFACTS_HOST="${FOOD_ROBOT_ARTIFACTS_HOST:-$HOME/food-robot-artifacts}"
+mkdir -p "$ARTIFACTS_HOST"
+ARTIFACT_FLAGS=(-v "$ARTIFACTS_HOST:/workspace/artifacts" -e FOOD_ROBOT_ARTIFACTS=/workspace/artifacts)
+if [[ -n "${FOOD_ROBOT_GIT_COMMIT:-}" ]]; then
+  ARTIFACT_FLAGS+=(-e FOOD_ROBOT_GIT_COMMIT)
+fi
+
 exec docker run "${RUN_FLAGS[@]}" \
   --gpus all --network host --ipc=host \
   -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y -e OMNI_KIT_ACCEPT_EULA=YES -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v "$ROOT":/workspace/food-robot \
   "${VOLUME_FLAGS[@]}" \
   "${WANDB_FLAGS[@]}" \
+  "${ARTIFACT_FLAGS[@]}" \
   -w /workspace/food-robot \
   "$IMAGE" "$@"

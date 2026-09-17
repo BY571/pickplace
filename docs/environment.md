@@ -146,9 +146,12 @@ changes by exactly the configured bonus/penalty.
 
 Each one-shot penalty/bonus is deliberately large enough that ending an episode early is never more
 profitable than a real attempt: dense shaping is non-negative, so early-ending never *gains* reward by
-itself, and the maximum dense shaping obtainable over a realistic zone traversal (≈ 145) or even by
-holding the bowl until `time_out` (≈ 212) does not exceed the 150 bonus/penalty by enough to make failing
-worthwhile once the one-shot term's sign is accounted for. `food_robot/envs/cell_env_cfg.py` documents the
+itself. With `grasp` added, the maximum dense shaping over a realistic zone traversal is ≈ 159 and holding the
+bowl until `time_out` could reach ≈ 232 — but those are absolute ceilings, not the comparison that decides
+behaviour. What matters is the *marginal* choice: a policy that stalls above the bowl instead of placing gains at
+most ≈ 23/s × the ≈ 3.2 s left before `time_out` ≈ 74, while forfeiting the 150 success bonus, so placing always
+wins; and deliberately dropping the food (−150 by default, −10 in run 3) is never rational, because doing
+nothing instead costs only the tiny regularization terms. `food_robot/envs/cell_env_cfg.py` documents the
 full anti-exploit argument next to the three constants, and asks you to re-check it whenever `belt.speed`,
 `belt.speed_noise`, `belt.place_window` or the dense reward weights change.
 

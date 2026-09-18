@@ -42,8 +42,12 @@ def main(cfg: DictConfig):
 
     from pathlib import Path
 
+    import warnings
+
     import torch
     import tqdm
+    from tensordict.nn import CudaGraphModule
+    from torchrl._utils import compile_with_warmup
     from torchrl.collectors import Collector
     from torchrl.data import LazyTensorStorage, TensorDictReplayBuffer
     from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
@@ -76,6 +80,13 @@ def main(cfg: DictConfig):
     )
 
     torch.manual_seed(cfg.env.seed)
+    torch.set_float32_matmul_precision(cfg.optim.matmul_precision)  # "highest" is PyTorch's default
+    # Compile wiring follows TorchRL's sota-implementations/ppo/ppo_mujoco.py.
+    compile_on, cudagraphs = bool(cfg.compile.compile), bool(cfg.compile.cudagraphs)
+    compile_mode = None
+    graphed = compile_on or cudagraphs  # outputs live in reused graph buffers: mark steps, clone outputs
+    if compile_on:
+        compile_mode = cfg.compile.compile_mode or ("default" if cudagraphs else "reduce-overhead")
     device = torch.device(cfg.env.device)
     env = make_env(OmegaConf.to_container(cfg.env, resolve=True))
     num_envs = env.batch_size[0]
@@ -114,14 +125,35 @@ def main(cfg: DictConfig):
             device=device,
             no_cuda_sync=True,
             trust_policy=True,
+            **(
+                {
+                    "compile_policy": {"mode": compile_mode, "warmup": 1} if compile_on else False,
+                    "cudagraph_policy": {"warmup": 10} if cudagraphs else False,
+                }
+                if compile_on or cudagraphs
+                else {}
+            ),
         )
         buffer = TensorDictReplayBuffer(
-            storage=LazyTensorStorage(frames_per_batch, device=device),
+            storage=LazyTensorStorage(frames_per_batch, device=device, compilable=compile_on),
             sampler=SamplerWithoutReplacement(),
             batch_size=mini_batch_size,
+            compilable=compile_on,
         )
+        # shifted: one critic call over [obs_0..obs_T] instead of two (obs and ("next", obs)). Both paths first
+        # replace NaN ("next", obs) on done rows (native auto-reset) with the root obs, see
+        # ValueEstimatorBase._sanitize_next_obs_nan; truncations beyond the one-slot budget are masked
+        # ("shifted_valid"), and ClipPPOLoss drops masked samples.
+        gae_kwargs = {"vectorized": False} if compile_on else {}
+        if cfg.loss.shifted_gae:
+            gae_kwargs["shifted"] = True
         adv_module = GAE(
-            gamma=cfg.loss.gamma, lmbda=cfg.loss.gae_lambda, value_network=critic, average_gae=False, device=device
+            gamma=cfg.loss.gamma,
+            lmbda=cfg.loss.gae_lambda,
+            value_network=critic,
+            average_gae=False,
+            device=device,
+            **gae_kwargs,
         )
         loss_module = ClipPPOLoss(
             actor_network=actor,
@@ -131,7 +163,36 @@ def main(cfg: DictConfig):
             critic_coeff=cfg.loss.critic_coeff,
             normalize_advantage=True,
         )
-        optim = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr, eps=1e-5)
+        if graphed:
+            # A tensor lr (updated in place) keeps the annealed lr from triggering recompiles; a tensor lr
+            # needs capturable=True in eager mode (compile_with_warmup runs the first call eagerly).
+            optim = torch.optim.Adam(
+                loss_module.parameters(), lr=torch.tensor(cfg.optim.lr, device=device), eps=1e-5, capturable=True
+            )
+        else:
+            optim = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr, eps=1e-5)
+
+        max_grad_norm = cfg.optim.max_grad_norm
+
+        def update(batch):
+            loss = loss_module(batch)
+            total = loss["loss_objective"] + loss["loss_critic"] + loss["loss_entropy"]
+            optim.zero_grad(set_to_none=True)
+            total.backward()
+            torch.nn.utils.clip_grad_norm_(loss_module.parameters(), max_grad_norm)
+            optim.step()
+            return loss.detach()
+
+        if compile_on:
+            update = compile_with_warmup(update, mode=compile_mode, warmup=1)
+            adv_module = compile_with_warmup(adv_module, mode=compile_mode, warmup=1)
+        if cudagraphs:
+            warnings.warn(
+                "CudaGraphModule is experimental and may lead to silently wrong results. Use with caution.",
+                category=UserWarning,
+            )
+            update = CudaGraphModule(update, in_keys=[], out_keys=[], warmup=5)
+            adv_module = CudaGraphModule(adv_module)
 
         logger = None
         if cfg.logger.backend:
@@ -218,15 +279,18 @@ def main(cfg: DictConfig):
             loss_sums, num_updates = {}, 0
             for _ in range(cfg.loss.ppo_epochs):
                 with torch.no_grad():
+                    if graphed:
+                        torch.compiler.cudagraph_mark_step_begin()
                     data = adv_module(data)
+                    if graphed:
+                        data = data.clone()
                 buffer.extend(data.exclude("next").reshape(-1))
                 for batch in buffer:
-                    loss = loss_module(batch)
-                    total = loss["loss_objective"] + loss["loss_critic"] + loss["loss_entropy"]
-                    optim.zero_grad(set_to_none=True)
-                    total.backward()
-                    torch.nn.utils.clip_grad_norm_(loss_module.parameters(), cfg.optim.max_grad_norm)
-                    optim.step()
+                    if graphed:
+                        torch.compiler.cudagraph_mark_step_begin()
+                    loss = update(batch)
+                    if graphed:
+                        loss = loss.clone()
                     for key in ("loss_objective", "loss_critic", "loss_entropy", "entropy", "kl_approx", "clip_fraction"):
                         if key in loss.keys():
                             loss_sums[key] = loss_sums.get(key, 0.0) + loss[key].detach().float().mean()
@@ -235,7 +299,7 @@ def main(cfg: DictConfig):
             update_s = time.perf_counter() - t1
 
             metrics.update({f"train/{k}": (v / num_updates).item() for k, v in loss_sums.items()})
-            metrics["train/lr"] = optim.param_groups[0]["lr"]
+            metrics["train/lr"] = float(optim.param_groups[0]["lr"])
             metrics.update(
                 {
                     "perf/collect_s": collect_s,
@@ -250,7 +314,11 @@ def main(cfg: DictConfig):
             )
             if cfg.optim.anneal_lr:
                 for group in optim.param_groups:
-                    group["lr"] = cfg.optim.lr * (1.0 - (iteration + 1) / total_iterations)
+                    lr = cfg.optim.lr * (1.0 - (iteration + 1) / total_iterations)
+                    if torch.is_tensor(group["lr"]):
+                        group["lr"].fill_(lr)
+                    else:
+                        group["lr"] = lr
             collector.update_policy_weights_()
 
             log_worker_results(metrics, frames_total)

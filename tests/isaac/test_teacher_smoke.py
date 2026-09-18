@@ -77,6 +77,19 @@ def test_teacher_trains_logs_terms_and_writes_checkpoints_with_manifests(tmp_pat
     assert manifest["config"]["env"]["reward_weights"] == {}
 
 
+def test_teacher_trains_with_compile_and_shifted_gae(tmp_path):
+    proc, tail = _train(
+        tmp_path, "max_iterations=4", "checkpoint.interval_frames=0", "worker.enabled=false",
+        "compile.compile=true", "loss.shifted_gae=true",
+    )
+    assert "PPO_DONE" in proc.stdout, tail
+    metrics = _lines(proc.stdout, "METRICS ")
+    assert len(metrics) == 4, tail
+    assert all(math.isfinite(v) for m in metrics for v in m.values() if isinstance(v, (int, float))), "NaN/inf"
+    for key in ("train/loss_objective", "train/loss_critic", "train/kl_approx", "perf/frames_per_hour"):
+        assert key in metrics[-1], key
+
+
 def test_teacher_early_stop_saves_final_checkpoint(tmp_path):
     proc, tail = _train(
         tmp_path, "max_iterations=40", "checkpoint.interval_frames=0", "worker.enabled=false",

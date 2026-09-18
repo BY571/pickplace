@@ -50,6 +50,7 @@ optim:
   lr: 3.0e-4
   anneal_lr: true
   max_grad_norm: 1.0
+  matmul_precision: highest  # torch.set_float32_matmul_precision: highest (PyTorch default) | high | medium
 
 loss:
   gamma: 0.99
@@ -59,6 +60,12 @@ loss:
   clip_epsilon: 0.2
   entropy_coeff: 0.005
   critic_coeff: 0.5
+  shifted_gae: false         # GAE(shifted=True): one critic call over obs_0..obs_T instead of obs and next obs
+
+compile:                     # torch.compile wiring as in TorchRL's sota-implementations/ppo/ppo_mujoco.py
+  compile: false             # compile the PPO update, GAE and the collector's policy call
+  compile_mode: null         # null: "reduce-overhead" ("default" with cudagraphs)
+  cudagraphs: false          # CudaGraphModule on update/GAE + collector cudagraph_policy (experimental)
 
 reward_scale: 0.1            # applied to the reward used for GAE/loss only; logged returns are unscaled
 

@@ -17,6 +17,21 @@ Early stopping (`early_stop.success_rate`) reads the background worker's **evalu
 training one: it stops once `early_stop.consecutive_evals` (4) evaluations in a row reach the threshold, so it
 needs `worker.enabled=true` (a warning is logged and early stopping is disabled otherwise).
 
+## v3 (return home, smoother motion)
+
+`config_v3.yaml` = `config.yaml` plus: `env.success_requires_home: true` — success (and the episode end) needs the
+food settled in the bowl **and** the arm joints within `env.home_tolerance` (0.15 rad, L2 over the 7 arm joints) of
+the default pose, so the teacher learns to finish the job instead of wandering after the release; reward set
+`simple_v3` — `return_home` (new dense term, `1 - tanh(d / 1 rad)` while the food lies released in the bowl),
+success 150, and small motion penalties (`action_rate` -0.1, `joint_vel` -0.01, `bowl_disturbance` -10) against
+jerky actions and bumped bowls (reasoning in `food_robot/reward_sets/simple_v3.yaml`); `total_frames` 1 B with early
+stopping (eval success now means placed AND home); W&B name `state_teacher_v3`. The v2 defaults are unchanged.
+
+    ./scripts/launch_teacher_v3.sh     # one detached container: v3 tests, then (only if they pass) training
+    python pipeline/0_state_teacher/train.py --config-name config_v3 [key=value ...]   # directly
+
+With a v3 checkpoint, try the continuous demo without the scripted return: `demo.py ... home_between=false`.
+
 ## Outputs (`$FOOD_ROBOT_ARTIFACTS/teachers/<run>/`)
 
 - `manifest.json` — git commit, resolved config, W&B URL, start/end, stop reason, checkpoint list.

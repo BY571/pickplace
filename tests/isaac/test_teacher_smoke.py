@@ -19,7 +19,7 @@ def _lines(stdout, prefix):
     return [json.loads(line[len(prefix):]) for line in stdout.splitlines() if line.startswith(prefix)]
 
 
-def _train(tmp_path, *overrides, timeout=2400):
+def _train(tmp_path, *overrides, timeout=2400, config_name=None):
     env = {
         **os.environ,
         "OMNI_KIT_ACCEPT_EULA": "YES",
@@ -30,6 +30,7 @@ def _train(tmp_path, *overrides, timeout=2400):
     }
     args = [
         str(TRAIN),
+        *(["--config-name", config_name] if config_name else []),
         f"env.num_envs={N}",
         "env.belt.speed=0.3",  # short belt cycle so episodes end within the smoke run
         "env.belt.place_window=0.6",
@@ -88,6 +89,19 @@ def test_teacher_trains_with_compile_and_shifted_gae(tmp_path):
     assert all(math.isfinite(v) for m in metrics for v in m.values() if isinstance(v, (int, float))), "NaN/inf"
     for key in ("train/loss_objective", "train/loss_critic", "train/kl_approx", "perf/frames_per_hour"):
         assert key in metrics[-1], key
+
+
+def test_teacher_v3_config_trains(tmp_path):
+    proc, tail = _train(
+        tmp_path, "max_iterations=4", "checkpoint.interval_frames=0", "worker.enabled=false", config_name="config_v3"
+    )
+    assert "PPO_DONE" in proc.stdout, tail
+    assert len(_lines(proc.stdout, "METRICS ")) == 4, tail
+    config = json.loads((tmp_path / "run" / "manifest.json").read_text())["config"]
+    assert config["env"]["reward_set"] == "simple_v3" and config["env"]["success_requires_home"] is True
+    assert config["collector"]["total_frames"] == 1_000_000_000 and config["logger"]["exp_name"] == "state_teacher_v3"
+    # everything else comes from config.yaml
+    assert config["network"]["hidden"] == [512, 256, 128] and config["env"]["action_mode"] == "ee_delta_pose"
 
 
 def test_teacher_early_stop_saves_final_checkpoint(tmp_path):

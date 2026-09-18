@@ -8,6 +8,7 @@ from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab_physx.sim.schemas import ArticulationRootPropertiesCfg, RigidBodyPropertiesCfg
 
 from food_robot.assets.usd_builders import BowlGeometry, PalletGeometry, bowl_usd_path, pallet_usd_path
+from food_robot.belt import BELT_COLOR
 
 
 def make_pallet_cfg(
@@ -18,6 +19,8 @@ def make_pallet_cfg(
         prim_path=prim_path,
         spawn=sim_utils.UsdFileCfg(
             usd_path=pallet_usd_path(geom),
+            # the plate reads as part of the conveyor: the belt's own material (visual only; geometry unchanged)
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=BELT_COLOR),
             rigid_props=RigidBodyPropertiesCfg(disable_gravity=True),
             articulation_props=ArticulationRootPropertiesCfg(
                 fix_root_link=True,

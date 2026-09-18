@@ -8,6 +8,10 @@ from food_robot.assets.usd_builders import BowlGeometry, PalletGeometry
 from food_robot.timing import BeltZone, belt_zone
 
 
+BELT_COLOR: tuple[float, float, float] = (0.08, 0.08, 0.08)
+"""Diffuse color of the belt strip and of the pallets riding on it (visual only)."""
+
+
 @configclass
 class BeltCfg:
     speed: float = 0.08

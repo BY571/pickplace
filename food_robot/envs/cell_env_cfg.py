@@ -31,7 +31,7 @@ from isaaclab_physx.sim.schemas import CollisionPropertiesCfg
 from food_robot.arms import FRANKA_CFG, ArmCfg
 from food_robot.assets.scene_assets import make_bowl_cfg, make_pallet_cfg
 from food_robot.assets.usd_builders import BowlGeometry
-from food_robot.belt import BeltCfg
+from food_robot.belt import BELT_COLOR, BeltCfg
 from food_robot.carousel import carousel_layout, park_position
 from food_robot.envs import mdp
 from food_robot.food import FoodSourceCfg, RigidFoodCfg
@@ -389,7 +389,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             init_state=AssetBaseCfg.InitialStateCfg(pos=(belt.zone_center_x, belt.belt_y, base_z - 0.004)),
             spawn=sim_utils.CuboidCfg(
                 size=(belt.visual_length(), 2 * belt.belt_half_width, 0.004),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.08, 0.08, 0.08)),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=BELT_COLOR),
             ),
         )
         if self.cameras:

@@ -1,0 +1,26 @@
+# simple_v3 — simple_v2 plus "finish the job" and smoother motion. Meant for env.success_requires_home: true
+# (pipeline/0_state_teacher/config_v3.yaml), where success = food settled in the bowl AND the arm back within
+# home_tolerance of its default joint pose.
+#
+# Changes from simple_v2:
+# - return_home 10 (new): while the food lies released in the bowl, 1 - tanh(d / 1 rad) with d the arm joints'
+#   distance to the default pose. Under simple_v2 the episode ended the moment the food settled, so the policy
+#   never learned what to do after placing (aimless moves; the continuous demo needed a scripted return home).
+# - success 100 -> 150: success now also needs the arm home and ends the episode, so it must clearly beat lingering
+#   over the bowl collecting food_in_bowl (20/s) + return_home (<= 10/s) until the bowl leaves the reach zone.
+# - action_rate -0.1, joint_vel -0.01, bowl_disturbance -10 (were 0): the v2 teacher's motion was jerky and bumped
+#   bowls. Sized from the last run's per-episode unweighted sums (action_rate ~6, joint_vel ~64, bowl_disturbance
+#   ~0.008 at a return of ~122; an early random policy: action_rate ~20-28, joint_vel ~80-140): the penalties cost
+#   ~0.6 + ~0.6 + ~0.1 per episode for the trained policy and ~2-3 + ~1-1.4 early on, a few % of the return, so they
+#   shape the motion without drowning the task reward (as the -150-scale penalties once did).
+# Dense weights are reward per second the term holds; event weights are one-shot.
+reach_food: 1.0
+grasp: 2.0
+grasp_lift: 5.0
+transport: 10.0
+food_in_bowl: 20.0
+return_home: 10.0
+success: 150.0
+action_rate: -0.1
+joint_vel: -0.01
+bowl_disturbance: -10.0

@@ -25,6 +25,7 @@ ENV = {
     "cameras": False,
     "privileged_information": True,
     "belt": {"speed": 0.3, "place_window": 0.6, "pallet_start_range": [0.0, 0.0]},
+    "success_requires_home": False,  # the default, stated: the forced success below must behave as before v3
 }
 if SPARSE:
     ENV["reward_weights"] = {t: 0.0 for t in REWARD_TERMS if t != "success"} | {"success": 7.0}
@@ -40,7 +41,7 @@ def force_events(u, cfg):
     Teleports (as `food_behaviour` / `belt_behaviour` do): env 0's food below the table (`food_off_table`),
     env 1's bowl sideways off the belt (`bowl_off_belt`), env 2's bowl tilted 60 deg (`bowl_tipped`), and
     env 3's food at rest in its bowl (`success` after the settle steps -- best effort, nothing asserts it; the
-    `food_in_bowl` dense component must be > 0 on env 3 and stay 0 on every other env).
+    `food_in_bowl` and `return_home` dense components must be > 0 on env 3 and stay 0 on every other env).
     """
     device = u.device
     food, bowl = u.scene["food"], u.scene["bowl"]
@@ -78,6 +79,9 @@ def main():
     zero_idx = [names.index(t) for t in DENSE_TERMS if weights[t] == 0.0]
     in_bowl_idx = REWARD_TERMS.index("food_in_bowl")
     in_bowl_max = torch.zeros(N)
+    home_idx = REWARD_TERMS.index("return_home")
+    home_max = torch.zeros(N)
+    success_params = sorted(u.termination_manager.get_term_cfg("success").params)
 
     td = env.reset()
     max_diff = max_sparse = max_sum_diff = 0.0
@@ -102,6 +106,7 @@ def main():
             unweighted = rm._step_reward[:, zero_idx].sum(-1) * u.step_dt
             max_diff = max(max_diff, float((reward - (rm._reward_buf - unweighted)).abs().max()))
         in_bowl_max = torch.maximum(in_bowl_max, terms[:, in_bowl_idx].float().cpu())
+        home_max = torch.maximum(home_max, terms[:, home_idx].float().cpu())
         events = terms[:, ev_idx]
         event_rows += int((events.sum(-1) > 0).sum())
         events_binary &= bool(((events == 0) | (events == 1)).all())
@@ -127,6 +132,8 @@ def main():
         events_only_on_done=events_only_on_done,
         max_abs_term_sum_diff=max_sum_diff,
         food_in_bowl_max=in_bowl_max.tolist(),
+        return_home_max=home_max.tolist(),
+        success_params=success_params,
     )
 
 

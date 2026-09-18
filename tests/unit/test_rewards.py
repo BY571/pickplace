@@ -5,6 +5,7 @@ from food_robot import rewards as R
 STAGED = {
     "reach_food": 1.0, "grasp": 2.0, "grasp_lift": 5.0, "transport": 10.0, "transport_fine": 5.0,
     "bowl_disturbance": -1.0, "action_rate": -1.0e-4, "joint_vel": -1.0e-4, "food_in_bowl": 0.0,
+    "return_home": 0.0,
     "success": 150.0, "bowl_failure": -150.0, "food_dropped": -150.0,
 }
 
@@ -37,9 +38,34 @@ def test_simple_v2_is_simple_v1_plus_food_in_bowl():
     assert {t: w for t, w in weights.items() if w != 0.0} == simple_v2
 
 
-def test_food_in_bowl_is_the_last_dense_term():
-    assert R.DENSE_TERMS[-1] == "food_in_bowl"
-    assert len(R.DENSE_TERMS) == 9 and len(R.REWARD_TERMS) == 12
+def test_simple_v3_weights():
+    simple_v3 = {"reach_food": 1.0, "grasp": 2.0, "grasp_lift": 5.0, "transport": 10.0, "food_in_bowl": 20.0,
+                 "return_home": 10.0, "success": 150.0, "action_rate": -0.1, "joint_vel": -0.01,
+                 "bowl_disturbance": -10.0}
+    weights = R.load_reward_set("simple_v3")
+    assert set(weights) == set(R.REWARD_TERMS)
+    assert {t: w for t, w in weights.items() if w != 0.0} == simple_v3
+    assert all(weights[t] == 0.0 for t in R.REWARD_TERMS if t not in simple_v3)
+
+
+def test_food_in_bowl_then_return_home_are_the_last_dense_terms():
+    # appended in this order, so older vectors are a prefix of the dense block
+    assert R.DENSE_TERMS[-2:] == ("food_in_bowl", "return_home")
+    assert len(R.DENSE_TERMS) == 10 and len(R.REWARD_TERMS) == 13
+
+
+def test_older_reward_sets_leave_return_home_at_zero():
+    for name in ("staged_v1", "simple_v1", "simple_v2"):
+        assert R.load_reward_set(name)["return_home"] == 0.0
+
+
+def test_env_options_home_defaults_and_unknown_keys_raise():
+    from food_robot.config import DEFAULT_ENV, build_cell_env_cfg
+
+    assert DEFAULT_ENV["success_requires_home"] is False  # every existing config keeps today's success
+    assert DEFAULT_ENV["home_tolerance"] > 0.02 * 7**0.5  # every randomised start pose counts as home
+    with pytest.raises(ValueError, match="succes_requires_home"):
+        build_cell_env_cfg({"succes_requires_home": True})
 
 
 def test_unlisted_terms_default_to_zero(tmp_path):

@@ -9,7 +9,7 @@ import torch
 from isaaclab.managers import SceneEntityCfg
 
 from food_robot.envs.mdp.observations import grasped_mask
-from food_robot.envs.mdp.terminations import released_in_bowl_mask
+from food_robot.envs.mdp.terminations import arm_home_distance, released_in_bowl_mask
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -98,6 +98,29 @@ def released_in_bowl(
     return released_in_bowl_mask(
         env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos, food_cfg, bowl_cfg
     ).float()
+
+
+def return_home(
+    env: ManagerBasedRLEnv,
+    std: float,
+    inner_radius: float,
+    base_thickness: float,
+    rim_height: float,
+    item_radius: float,
+    robot_cfg: SceneEntityCfg,
+    open_pos: float,
+    closed_pos: float,
+    arm_cfg: SceneEntityCfg,
+    food_cfg: SceneEntityCfg = SceneEntityCfg("food"),
+    bowl_cfg: SceneEntityCfg = SceneEntityCfg("bowl"),
+) -> torch.Tensor:
+    """While the food is released inside the bowl: ``1 - tanh(d / std)``, ``d`` = the arm joints' L2 distance
+    [rad] to the default pose (``arm_home_distance``, the same distance the ``success_requires_home`` check uses);
+    0 otherwise. Teaches finishing the job: after placing, go back home."""
+    placed = released_in_bowl_mask(
+        env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos, food_cfg, bowl_cfg
+    )
+    return placed.float() * (1.0 - torch.tanh(arm_home_distance(env, arm_cfg) / std))
 
 
 def termination_indicator(env: ManagerBasedRLEnv, term_names: list[str]) -> torch.Tensor:

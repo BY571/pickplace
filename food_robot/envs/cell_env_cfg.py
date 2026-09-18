@@ -203,6 +203,10 @@ class RewardsCfg:
     action_rate = RewTerm(func=base_mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=base_mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
     food_in_bowl = RewTerm(func=mdp.released_in_bowl, weight=1.0, params={})  # params set by _build_food_terms
+    # std 1.0 rad: the arm's placing pose over the belt is roughly 1 rad (joint-space L2) from the default pose, so
+    # the term still pays ~0.2 and has a usable slope right after the release; 0.5 would saturate near 0 there.
+    # At home_tolerance (0.15 rad) it pays ~0.85.
+    return_home = RewTerm(func=mdp.return_home, weight=1.0, params={"std": 1.0})  # rest set by _build_food_terms
 
 
 @configclass
@@ -279,6 +283,13 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     food_drop_penalty: float = 150.0
     """Return subtracted once when the food falls off the table."""
     success_settle_steps: int = 5
+    success_requires_home: bool = False
+    """Success = food settled in the bowl AND the arm joints within ``home_tolerance`` of the default pose (see
+    ``mdp.food_in_bowl``). False: success as before (settled in the bowl only)."""
+    home_tolerance: float = 0.15
+    """Radius of "at home" [rad, L2 over the arm joints, fingers excluded]. ``reset_robot_joints`` offsets each of the
+    7 arm joints by U(-0.02, 0.02), so a fresh start is at most 0.02 * sqrt(7) ~= 0.053 rad from the default pose;
+    0.15 (~3x) counts every start pose as home with margin, while still being ~0.06 rad (~3 deg) per joint."""
     demo: bool = False
     """Continuous-demo scene (``pipeline/0_state_teacher/demo.py``), never used for training: ``demo_bowls``
     pallet+bowl pairs spaced ``demo_spacing`` apart on the belt, ``demo_food_pool`` spare food items parked under
@@ -560,7 +571,14 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
 
         # the success termination and the food_in_bowl reward share one "in the bowl" geometry
         self.terminations.success.params = {**bowl_params(), "settle_steps": self.success_settle_steps}
+        if self.success_requires_home:
+            self.terminations.success.params.update(
+                home_tolerance=self.home_tolerance, arm_cfg=SceneEntityCfg("robot", joint_names=arm.arm_joint_names)
+            )
         self.rewards.food_in_bowl.params = bowl_params()
+        self.rewards.return_home.params.update(
+            **bowl_params(), arm_cfg=SceneEntityCfg("robot", joint_names=arm.arm_joint_names)
+        )
         hover = bowl.base_thickness + bowl.wall_height + self.food.item_radius + 0.03
         self.rewards.grasp.params.update(grip_params())
         self.rewards.grasp_lift.params.update(grip_params())
@@ -624,3 +642,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             if isinstance(term, DoneTerm):
                 self.demo_termination_params[name] = copy.deepcopy(term.params)
                 term.func, term.params = mdp.never, {}
+        # the demo counts a placement when the food settles (``settled_in_bowl_mask``); "and the arm is home" is a
+        # training-episode rule (success_requires_home), so its params are not part of the placement check
+        for key in ("home_tolerance", "arm_cfg"):
+            self.demo_termination_params["success"].pop(key, None)

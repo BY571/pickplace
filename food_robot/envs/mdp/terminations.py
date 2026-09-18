@@ -73,6 +73,15 @@ def released_in_bowl_mask(
     return radial_ok & height_ok & released
 
 
+def arm_home_distance(env: ManagerBasedRLEnv, arm_cfg: SceneEntityCfg) -> torch.Tensor:
+    """L2 norm [rad] of the arm joints' offset from the robot's default joint pose (``arm_cfg`` selects the arm
+    joints, not the gripper fingers). The single definition of "how far from home" shared by the
+    ``return_home`` reward and the ``success_requires_home`` check of the success termination."""
+    data = env.scene[arm_cfg.name].data
+    offset = data.joint_pos.torch[:, arm_cfg.joint_ids] - data.default_joint_pos.torch[:, arm_cfg.joint_ids]
+    return torch.linalg.vector_norm(offset, dim=-1)
+
+
 REL_SPEED_THRESHOLD = 0.05
 """Food-to-bowl speed [m/s] below which the food counts as at rest in the bowl (``settled_in_bowl_mask``)."""
 
@@ -110,7 +119,12 @@ def never(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 
 class food_in_bowl(ManagerTermBase):
-    """Success: food inside the target bowl, released, and at rest relative to the bowl for ``settle_steps``."""
+    """Success: food inside the target bowl, released, and at rest relative to the bowl for ``settle_steps``.
+
+    With ``home_tolerance`` set (env option ``success_requires_home``) it additionally requires the arm joints
+    within ``home_tolerance`` [rad, L2] of the default pose (``arm_home_distance``): the episode ends only once the
+    food is placed AND the arm is back home. The settle counter keeps counting meanwhile, so success fires on the
+    first step the arm is home after the food has settled. Unset (the default), nothing changes."""
 
     def __init__(self, cfg: TerminationTermCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
@@ -136,10 +150,15 @@ class food_in_bowl(ManagerTermBase):
         rel_speed_threshold: float = REL_SPEED_THRESHOLD,
         food_cfg: SceneEntityCfg = SceneEntityCfg("food"),
         bowl_cfg: SceneEntityCfg = SceneEntityCfg("bowl"),
+        home_tolerance: float | None = None,
+        arm_cfg: SceneEntityCfg | None = None,
     ) -> torch.Tensor:
         inside = settled_in_bowl_mask(
             env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos,
             food_cfg, bowl_cfg, rel_speed_threshold,
         )
         self.counter = torch.where(inside, self.counter + 1, torch.zeros_like(self.counter))
-        return self.counter >= settle_steps
+        placed = self.counter >= settle_steps
+        if home_tolerance is None:
+            return placed
+        return placed & (arm_home_distance(env, arm_cfg) <= home_tolerance)

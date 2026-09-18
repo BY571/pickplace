@@ -19,7 +19,14 @@ from food_robot.envs.mdp.rewards import (
     grasped,
     reach_food,
     released_in_bowl,
+    return_home,
     termination_indicator,
     transport_to_bowl,
 )
-from food_robot.envs.mdp.terminations import food_in_bowl, food_off_table, never, settled_in_bowl_mask
+from food_robot.envs.mdp.terminations import (
+    arm_home_distance,
+    food_in_bowl,
+    food_off_table,
+    never,
+    settled_in_bowl_mask,
+)

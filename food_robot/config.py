@@ -26,6 +26,9 @@ DEFAULT_ENV: dict = {
     "bowl_failure_penalty": None,
     "food_drop_penalty": None,
     "success_settle_steps": 5,
+    # Success also requires the arm back within home_tolerance [rad] of its default pose (FoodCellEnvCfg).
+    "success_requires_home": False,
+    "home_tolerance": 0.15,
     "ingredient_bowl_pos": [0.45, -0.10, 0.0],
     # Fixed as of task 14 (was [0.35, 0.55] / [-0.20, 0.00]): the food is randomized inside the wider supply
     # tray instead (RigidFoodCfg.spawn_range), so the container itself no longer needs its own position DR.
@@ -75,13 +78,15 @@ def _geometry_kwargs(belt_kwargs: dict) -> dict:
 
 def build_cell_env_cfg(env_cfg: Mapping):
     """Merge ``env_cfg`` over ``DEFAULT_ENV`` and construct the Isaac Lab env config."""
+    # validated before the simulator imports below, so a typo fails fast (and is unit-testable without Isaac Sim)
+    unknown = set(env_cfg) - set(DEFAULT_ENV)
+    if unknown:
+        raise ValueError(f"Unknown env config keys {sorted(unknown)}. Allowed: {sorted(DEFAULT_ENV)}")
+
     from food_robot.belt import BeltCfg
     from food_robot.envs.cell_env_cfg import FoodCellEnvCfg, scale_physx_buffers
     from food_robot.rewards import DENSE_TERMS, isaac_weight, resolve_reward_weights
 
-    unknown = set(env_cfg) - set(DEFAULT_ENV)
-    if unknown:
-        raise ValueError(f"Unknown env config keys {sorted(unknown)}. Allowed: {sorted(DEFAULT_ENV)}")
     c = {**DEFAULT_ENV, **env_cfg}
     weights = resolve_reward_weights(c)
     arm = _resolve(ARMS, c["arm"], "arm")
@@ -108,6 +113,8 @@ def build_cell_env_cfg(env_cfg: Mapping):
         bowl_failure_penalty=-weights["bowl_failure"],
         food_drop_penalty=-weights["food_dropped"],
         success_settle_steps=int(c["success_settle_steps"]),
+        success_requires_home=bool(c["success_requires_home"]),
+        home_tolerance=float(c["home_tolerance"]),
         ingredient_bowl_pos=tuple(c["ingredient_bowl_pos"]),
         ingredient_bowl_x_range=tuple(c["ingredient_bowl_x_range"]),
         ingredient_bowl_y_range=tuple(c["ingredient_bowl_y_range"]),

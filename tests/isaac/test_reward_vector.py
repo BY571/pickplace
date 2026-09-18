@@ -6,7 +6,7 @@ pytestmark = pytest.mark.isaac
 def test_reward_vector_reproduces_isaac_lab_reward_and_specs(run_scenario):
     r = run_scenario("reward_vector")
     assert r["check_env_specs"] == "ok"
-    assert r["reward_terms_shape"] == [16, 12]
+    assert r["reward_terms_shape"] == [16, 13]
     assert r["done_rows"] > 0, "rollout must include episode ends"
     # the TorchRL linearised reward equals Isaac Lab's own scalar, step by step
     assert r["max_abs_reward_diff"] < 1e-4
@@ -20,6 +20,12 @@ def test_reward_vector_reproduces_isaac_lab_reward_and_specs(run_scenario):
     in_bowl = r["food_in_bowl_max"]
     assert in_bowl[3] > 0
     assert all(v == 0.0 for i, v in enumerate(in_bowl) if i != 3)
+    # return_home is gated by the same "released in the bowl" condition (it pays wherever the arm is)
+    home = r["return_home_max"]
+    assert home[3] > 0
+    assert all(v == 0.0 for i, v in enumerate(home) if i != 3)
+    # success_requires_home false (the default): the success termination is exactly the pre-v3 one
+    assert "home_tolerance" not in r["success_params"] and "arm_cfg" not in r["success_params"]
 
 
 def test_reward_set_switch_changes_the_scalar_only(run_scenario):

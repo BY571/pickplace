@@ -23,6 +23,7 @@ DENSE_TERMS: tuple[str, ...] = (
     "action_rate",
     "joint_vel",
     "food_in_bowl",
+    "return_home",
 )
 EVENT_TERMS: tuple[str, ...] = ("success", "bowl_failure", "food_dropped")
 REWARD_TERMS: tuple[str, ...] = DENSE_TERMS + EVENT_TERMS

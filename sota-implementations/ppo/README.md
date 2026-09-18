@@ -110,7 +110,8 @@ Logged metrics (W&B, and one `METRICS {json}` stdout line per iteration):
   raising `PhysxCfg.gpu_total_aggregate_pairs_capacity` to `32*1024` in
   `food_robot/envs/cell_env_cfg.py`; two subsequent runs at the same `num_envs=4096` produced zero PhysX
   errors. A later, longer teacher run at 4096 envs (2026-09-18) requested ~33.2k and logged ~25k errors,
-  so the capacity is now `64*1024` and scales linearly above 4096 envs (`scale_physx_buffers`).
+  and 64k overflowed as well (the logged request tracks the capacity), so the capacity is now PhysX's default
+  `2*1024*1024` and scales linearly above 4096 envs (`scale_physx_buffers`).
 - **Episodes finishing:** with only 5×24 = 120 steps/env (≈ 2.4 s of the ≈ 9 s max episode length), most
   of the 4096 envs' episodes are still in progress when the run ends; whether *any* env's episode
   finishes early (e.g. `bowl_tipped`/`food_off_table` under the initial random policy) varies run to run.

@@ -296,8 +296,11 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             # Validated at VALIDATED_NUM_ENVS=4096 (scale_physx_buffers scales it above). 16*1024 overflowed
             # (Spark 2026-09-15: ~16,883 requested, ~118 "PxgAABBManager.cpp" errors in 5 PPO iterations);
             # 32*1024 overflowed too (Spark 2026-09-18, 4096 envs: ~33.2k requested, ~25k errors in one
-            # teacher run; missed contacts dropped bowls through the pallet). 64*1024 leaves ~2x headroom.
-            gpu_total_aggregate_pairs_capacity=64 * 1024,
+            # teacher run; missed contacts dropped bowls through the pallet), and so did 64*1024 (~65.7k
+            # requested, 134 errors in a 60-iteration probe): the "requested" figure PhysX logs sits just above
+            # whatever the capacity is, so it is not the true need. PhysX's own default (2*1024*1024) gave
+            # 0 errors in the same probe at unchanged throughput.
+            gpu_total_aggregate_pairs_capacity=2 * 1024 * 1024,
             friction_correlation_distance=0.00625,
         )
         validate_observation_flags(self.cameras, self.privileged_information)

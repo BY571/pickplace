@@ -9,6 +9,7 @@ import torch
 from isaaclab.managers import SceneEntityCfg
 
 from food_robot.envs.mdp.observations import grasped_mask
+from food_robot.envs.mdp.terminations import released_in_bowl_mask
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -77,6 +78,26 @@ def transport_to_bowl(
     grasped = grasped_mask(env, robot_cfg, food_cfg, open_pos=open_pos, closed_pos=closed_pos)
     held = grasped & (food_z > lift_height)
     return held.float() * (1.0 - torch.tanh(distance / std))
+
+
+def released_in_bowl(
+    env: ManagerBasedRLEnv,
+    inner_radius: float,
+    base_thickness: float,
+    rim_height: float,
+    item_radius: float,
+    robot_cfg: SceneEntityCfg,
+    open_pos: float,
+    closed_pos: float,
+    food_cfg: SceneEntityCfg = SceneEntityCfg("food"),
+    bowl_cfg: SceneEntityCfg = SceneEntityCfg("bowl"),
+) -> torch.Tensor:
+    """1.0 while the food is inside the bowl and released (same test as the success termination, minus its
+    speed and settle requirements). Requiring the release stops a policy from lowering the held food into the
+    bowl and hovering there."""
+    return released_in_bowl_mask(
+        env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos, food_cfg, bowl_cfg
+    ).float()
 
 
 def termination_indicator(env: ManagerBasedRLEnv, term_names: list[str]) -> torch.Tensor:

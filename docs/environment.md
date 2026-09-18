@@ -143,6 +143,7 @@ changes by exactly the configured bonus/penalty.
 | `food_dropped` | −`food_drop_penalty` (150) once | food off table |
 | `bowl_disturbance` | −1 | distance the bowl was pushed from where the pallet carries it |
 | `action_rate`, `joint_vel` | −1e-4 | regularization |
+| `food_in_bowl` | 0 in `staged_v1` (20 in `simple_v2`) | food inside the bowl and released (the success termination's geometry, without its speed/settle test) |
 
 Each one-shot penalty/bonus is deliberately large enough that ending an episode early is never more
 profitable than a real attempt: dense shaping is non-negative, so early-ending never *gains* reward by
@@ -157,9 +158,9 @@ full anti-exploit argument next to the three constants, and asks you to re-check
 
 ### Reward-term vector and reward sets
 
-`make_env` exposes every reward term, unweighted, as `("next", "reward_terms")` (shape `(N, 11)`) in
+`make_env` exposes every reward term, unweighted, as `("next", "reward_terms")` (shape `(N, 12)`) in
 `food_robot.rewards.REWARD_TERMS` order: the dense terms `reach_food`, `grasp`, `grasp_lift`, `transport`,
-`transport_fine`, `bowl_disturbance`, `action_rate`, `joint_vel` (component = term value × dt, recovered from
+`transport_fine`, `bowl_disturbance`, `action_rate`, `joint_vel`, `food_in_bowl` (component = term value × dt, recovered from
 Isaac Lab's reward manager) followed by the event terms `success`, `bowl_failure`, `food_dropped` (0/1, only
 non-zero on the done row of an episode that ended that way, taken from `("next", "outcome", ...)`; `success`
 is the Isaac Lab term `place_success`).

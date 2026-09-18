@@ -17,7 +17,7 @@ env:
     bowl_offset_y: [-0.04, 0.04]
   ingredient_bowl_x_range: [0.45, 0.45]
   ingredient_bowl_y_range: [-0.10, -0.10]
-  reward_set: simple_v1      # food_robot/reward_sets/<name>.yaml
+  reward_set: simple_v2      # food_robot/reward_sets/<name>.yaml
   reward_weights: {}         # per-run overrides on top of the set
   food_params: {}
   seed: 0

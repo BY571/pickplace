@@ -69,7 +69,7 @@ def test_teacher_trains_logs_terms_and_writes_checkpoints_with_manifests(tmp_pat
     assert len(names) >= 3, names  # 3000-frame interval over 6144 frames: two periodic + final
     for p in ckpts:
         m = json.loads(p.with_suffix(".json").read_text())
-        assert m["frames"] > 0 and len(m["sha256"]) == 64 and m["config"]["env"]["reward_set"] == "simple_v1"
+        assert m["frames"] > 0 and len(m["sha256"]) == 64 and m["config"]["env"]["reward_set"] == "simple_v2"
         assert m["eval"] is None and m["video"] is None
     manifest = json.loads((run / "manifest.json").read_text())
     assert manifest["kind"] == "state_teacher" and manifest["stop_reason"] == "total_frames"

@@ -18,6 +18,7 @@ from food_robot.envs.mdp.rewards import (
     grasp_lift,
     grasped,
     reach_food,
+    released_in_bowl,
     termination_indicator,
     transport_to_bowl,
 )

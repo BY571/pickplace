@@ -15,8 +15,8 @@ import torch  # noqa: E402
 from torchrl.envs.utils import check_env_specs  # noqa: E402
 
 from food_robot.config import build_cell_env_cfg  # noqa: E402
-from food_robot.rewards import EVENT_TERMS, REWARD_TERMS  # noqa: E402
-from food_robot.torchrl_env import make_env  # noqa: E402
+from food_robot.rewards import DENSE_TERMS, EVENT_TERMS, REWARD_TERMS  # noqa: E402
+from food_robot.torchrl_env import make_env, reward_weights  # noqa: E402
 
 N, STEPS = 16, 600
 # Short belt cycle so episodes end often within the rollout (as in the torchrl_episodes scenario).
@@ -39,7 +39,8 @@ def force_events(u, cfg):
 
     Teleports (as `food_behaviour` / `belt_behaviour` do): env 0's food below the table (`food_off_table`),
     env 1's bowl sideways off the belt (`bowl_off_belt`), env 2's bowl tilted 60 deg (`bowl_tipped`), and
-    env 3's food at rest in its bowl (`success` after the settle steps -- best effort, nothing asserts it).
+    env 3's food at rest in its bowl (`success` after the settle steps -- best effort, nothing asserts it; the
+    `food_in_bowl` dense component must be > 0 on env 3 and stay 0 on every other env).
     """
     device = u.device
     food, bowl = u.scene["food"], u.scene["bowl"]
@@ -70,6 +71,13 @@ def main():
     u = env.base_env._env.unwrapped
     rm = u.reward_manager
     ev_idx = [REWARD_TERMS.index(t) for t in EVENT_TERMS]
+    # Isaac Lab computes zero-weight dense terms at weight 1.0 (so the vector can recover them), and those
+    # land in its own `_reward_buf`; the reward set weights them 0, so drop their contribution before comparing.
+    weights = reward_weights(ENV)
+    names = list(rm.active_terms)
+    zero_idx = [names.index(t) for t in DENSE_TERMS if weights[t] == 0.0]
+    in_bowl_idx = REWARD_TERMS.index("food_in_bowl")
+    in_bowl_max = torch.zeros(N)
 
     td = env.reset()
     max_diff = max_sparse = max_sum_diff = 0.0
@@ -91,7 +99,9 @@ def main():
             expected = 7.0 * terms[:, REWARD_TERMS.index("success")]
             max_sparse = max(max_sparse, float((reward - expected).abs().max()))
         else:
-            max_diff = max(max_diff, float((reward - rm._reward_buf).abs().max()))
+            unweighted = rm._step_reward[:, zero_idx].sum(-1) * u.step_dt
+            max_diff = max(max_diff, float((reward - (rm._reward_buf - unweighted)).abs().max()))
+        in_bowl_max = torch.maximum(in_bowl_max, terms[:, in_bowl_idx].float().cpu())
         events = terms[:, ev_idx]
         event_rows += int((events.sum(-1) > 0).sum())
         events_binary &= bool(((events == 0) | (events == 1)).all())
@@ -116,6 +126,7 @@ def main():
         events_binary=events_binary,
         events_only_on_done=events_only_on_done,
         max_abs_term_sum_diff=max_sum_diff,
+        food_in_bowl_max=in_bowl_max.tolist(),
     )
 
 

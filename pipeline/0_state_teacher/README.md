@@ -1,8 +1,8 @@
 # Stage 0 · privileged state teacher
 
 PPO from robot state (`proprio`), bowl pose (`belt`) and food pose + grasp flag (`privileged`), cameras off,
-with a dense simulator-only reward (`env.reward_set`, default `simple_v1`: reach, grasp, lift, transport and
-success, no penalties). Its checkpoints are the experts stage 1 records camera datasets from.
+with a dense simulator-only reward (`env.reward_set`, default `simple_v2`: reach, grasp, lift, transport,
+food released in the bowl and success, no penalties). Its checkpoints are the experts stage 1 records camera datasets from.
 
 ## Run (DGX Spark)
 

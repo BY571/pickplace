@@ -201,6 +201,7 @@ class RewardsCfg:
     bowl_disturbance = RewTerm(func=mdp.bowl_disturbance, weight=-1.0)
     action_rate = RewTerm(func=base_mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=base_mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
+    food_in_bowl = RewTerm(func=mdp.released_in_bowl, weight=1.0, params={})  # params set by _build_food_terms
 
 
 @configclass
@@ -530,14 +531,18 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         def grip_params() -> dict:
             return {"robot_cfg": gripper_cfg(), "open_pos": arm.gripper_open, "closed_pos": arm.gripper_closed}
 
-        self.terminations.success.params = {
-            "inner_radius": bowl.inner_radius,
-            "base_thickness": bowl.base_thickness,
-            "rim_height": bowl.wall_height,
-            "item_radius": self.food.item_radius,
-            "settle_steps": self.success_settle_steps,
-            **grip_params(),
-        }
+        def bowl_params() -> dict:
+            return {
+                "inner_radius": bowl.inner_radius,
+                "base_thickness": bowl.base_thickness,
+                "rim_height": bowl.wall_height,
+                "item_radius": self.food.item_radius,
+                **grip_params(),
+            }
+
+        # the success termination and the food_in_bowl reward share one "in the bowl" geometry
+        self.terminations.success.params = {**bowl_params(), "settle_steps": self.success_settle_steps}
+        self.rewards.food_in_bowl.params = bowl_params()
         hover = bowl.base_thickness + bowl.wall_height + self.food.item_radius + 0.03
         self.rewards.grasp.params.update(grip_params())
         self.rewards.grasp_lift.params.update(grip_params())

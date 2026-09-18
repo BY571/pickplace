@@ -48,6 +48,31 @@ def food_off_table(env: ManagerBasedRLEnv, minimum_height: float = -0.05, food_c
     return _pos_cell(env, food_cfg)[:, 2] < minimum_height
 
 
+def released_in_bowl_mask(
+    env: ManagerBasedRLEnv,
+    inner_radius: float,
+    base_thickness: float,
+    rim_height: float,
+    item_radius: float,
+    robot_cfg: SceneEntityCfg,
+    open_pos: float,
+    closed_pos: float,
+    food_cfg: SceneEntityCfg,
+    bowl_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """The food is inside the bowl (radially within the inner wall, between base and rim) and not grasped.
+
+    The single definition of "in the bowl" shared by the ``food_in_bowl`` success termination and the
+    ``released_in_bowl`` reward, so the two can never disagree.
+    """
+    food_pos, bowl_pos = env.scene[food_cfg.name].data.root_pos_w.torch, env.scene[bowl_cfg.name].data.root_pos_w.torch
+    rel = food_pos - bowl_pos  # bowl origin = bottom center
+    radial_ok = torch.linalg.vector_norm(rel[:, :2], dim=-1) < inner_radius - 0.5 * item_radius
+    height_ok = (rel[:, 2] > base_thickness) & (rel[:, 2] < base_thickness + rim_height)
+    released = ~grasped_mask(env, robot_cfg, food_cfg, open_pos=open_pos, closed_pos=closed_pos)
+    return radial_ok & height_ok & released
+
+
 class food_in_bowl(ManagerTermBase):
     """Success: food inside the target bowl, released, and at rest relative to the bowl for ``settle_steps``."""
 
@@ -77,11 +102,11 @@ class food_in_bowl(ManagerTermBase):
         bowl_cfg: SceneEntityCfg = SceneEntityCfg("bowl"),
     ) -> torch.Tensor:
         food, bowl = env.scene[food_cfg.name].data, env.scene[bowl_cfg.name].data
-        rel = food.root_pos_w.torch - bowl.root_pos_w.torch  # bowl origin = bottom center
-        radial_ok = torch.linalg.vector_norm(rel[:, :2], dim=-1) < inner_radius - 0.5 * item_radius
-        height_ok = (rel[:, 2] > base_thickness) & (rel[:, 2] < base_thickness + rim_height)
-        released = ~grasped_mask(env, robot_cfg, food_cfg, open_pos=open_pos, closed_pos=closed_pos)
+        in_bowl = released_in_bowl_mask(
+            env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos,
+            food_cfg, bowl_cfg,
+        )
         rel_speed = torch.linalg.vector_norm(food.root_lin_vel_w.torch - bowl.root_lin_vel_w.torch, dim=-1)
-        inside = radial_ok & height_ok & released & (rel_speed < rel_speed_threshold)
+        inside = in_bowl & (rel_speed < rel_speed_threshold)
         self.counter = torch.where(inside, self.counter + 1, torch.zeros_like(self.counter))
         return self.counter >= settle_steps

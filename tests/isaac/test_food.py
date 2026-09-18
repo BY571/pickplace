@@ -19,5 +19,5 @@ def test_success_drop_and_food_reset(run_scenario):
     assert all(abs(dx) <= r["food_spawn_range"] + 5e-3 and abs(dy) <= r["food_spawn_range"] + 5e-3 for dx, dy in spread)
     assert r["reward_terms"] == sorted(
         ["reach_food", "grasp", "grasp_lift", "transport", "transport_fine", "place_success", "bowl_failure",
-         "food_dropped", "bowl_disturbance", "action_rate", "joint_vel"]
+         "food_dropped", "bowl_disturbance", "action_rate", "joint_vel", "food_in_bowl"]
     )

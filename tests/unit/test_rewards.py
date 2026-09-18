@@ -4,7 +4,7 @@ from food_robot import rewards as R
 
 STAGED = {
     "reach_food": 1.0, "grasp": 2.0, "grasp_lift": 5.0, "transport": 10.0, "transport_fine": 5.0,
-    "bowl_disturbance": -1.0, "action_rate": -1.0e-4, "joint_vel": -1.0e-4,
+    "bowl_disturbance": -1.0, "action_rate": -1.0e-4, "joint_vel": -1.0e-4, "food_in_bowl": 0.0,
     "success": 150.0, "bowl_failure": -150.0, "food_dropped": -150.0,
 }
 
@@ -27,6 +27,19 @@ def test_simple_v1_is_the_five_positive_task_terms():
     assert set(weights) == set(R.REWARD_TERMS)
     assert {t: w for t, w in weights.items() if w != 0.0} == simple
     assert all(weights[t] == 0.0 for t in R.REWARD_TERMS if t not in simple)
+
+
+def test_simple_v2_is_simple_v1_plus_food_in_bowl():
+    simple_v2 = {"reach_food": 1.0, "grasp": 2.0, "grasp_lift": 5.0, "transport": 10.0, "success": 100.0,
+                 "food_in_bowl": 20.0}
+    weights = R.load_reward_set("simple_v2")
+    assert set(weights) == set(R.REWARD_TERMS)
+    assert {t: w for t, w in weights.items() if w != 0.0} == simple_v2
+
+
+def test_food_in_bowl_is_the_last_dense_term():
+    assert R.DENSE_TERMS[-1] == "food_in_bowl"
+    assert len(R.DENSE_TERMS) == 9 and len(R.REWARD_TERMS) == 12
 
 
 def test_unlisted_terms_default_to_zero(tmp_path):

@@ -1,0 +1,8 @@
+# simple_v1 — the smallest reward that describes the task: get to the food, close on it, lift it, carry it
+# above the bowl, succeed. All terms are non-negative; no penalties (an episode that ends early forfeits all
+# remaining positive reward, which is penalty enough). Dense weights are reward per second the term holds.
+reach_food: 1.0
+grasp: 2.0
+grasp_lift: 5.0
+transport: 10.0
+success: 100.0

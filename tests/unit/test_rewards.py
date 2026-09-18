@@ -21,6 +21,14 @@ def test_staged_v1_matches_todays_reward():
     assert R.load_reward_set("staged_v1") == STAGED
 
 
+def test_simple_v1_is_the_five_positive_task_terms():
+    simple = {"reach_food": 1.0, "grasp": 2.0, "grasp_lift": 5.0, "transport": 10.0, "success": 100.0}
+    weights = R.load_reward_set("simple_v1")
+    assert set(weights) == set(R.REWARD_TERMS)
+    assert {t: w for t, w in weights.items() if w != 0.0} == simple
+    assert all(weights[t] == 0.0 for t in R.REWARD_TERMS if t not in simple)
+
+
 def test_unlisted_terms_default_to_zero(tmp_path):
     p = tmp_path / "sparse.yaml"
     p.write_text("success: 1.0\n")

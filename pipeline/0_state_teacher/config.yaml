@@ -17,9 +17,8 @@ env:
     bowl_offset_y: [-0.04, 0.04]
   ingredient_bowl_x_range: [0.45, 0.45]
   ingredient_bowl_y_range: [-0.10, -0.10]
-  reward_set: staged_v1      # food_robot/reward_sets/<name>.yaml
-  reward_weights:            # per-run overrides on top of the set
-    food_dropped: -10.0      # carried over from pixel run 3: at -150 one knocked-off ball outweighed an episode of reaching
+  reward_set: simple_v1      # food_robot/reward_sets/<name>.yaml
+  reward_weights: {}         # per-run overrides on top of the set
   food_params: {}
   seed: 0
   device: cuda:0

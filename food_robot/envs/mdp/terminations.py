@@ -75,11 +75,40 @@ def released_in_bowl_mask(
 
 def arm_home_distance(env: ManagerBasedRLEnv, arm_cfg: SceneEntityCfg) -> torch.Tensor:
     """L2 norm [rad] of the arm joints' offset from the robot's default joint pose (``arm_cfg`` selects the arm
-    joints, not the gripper fingers). The single definition of "how far from home" shared by the
-    ``return_home`` reward and the ``success_requires_home`` check of the success termination."""
+    joints, not the gripper fingers). Only used to pick the sample the home TCP position is latched from."""
     data = env.scene[arm_cfg.name].data
     offset = data.joint_pos.torch[:, arm_cfg.joint_ids] - data.default_joint_pos.torch[:, arm_cfg.joint_ids]
     return torch.linalg.vector_norm(offset, dim=-1)
+
+
+def tcp_home_distance(
+    env: ManagerBasedRLEnv, arm_cfg: SceneEntityCfg, ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame")
+) -> torch.Tensor:
+    """Distance [m] of the TCP (the ``ee_frame`` target the other reward terms use) from the home TCP position.
+
+    "Home" is defined in end-effector position space, not joint space: the policy acts on the end-effector pose
+    (IK), which leaves the Franka's redundant elbow free to drift, so a joint-space home could be unreachable.
+
+    The home TCP position (cell frame) is the TCP at the robot's default joint pose, identical in every env. It is
+    latched from the simulator rather than computed: on every call, the env whose arm joints are currently closest
+    to the default pose (``arm_home_distance``) is a candidate, and it replaces the stored position when it is
+    closer than every sample seen before. TCP and joints are read at the same instant (post-physics, when terms
+    are evaluated), so every sample is an exact point of the arm's kinematics and the stored position's error is
+    roughly (1 m) x (its joint distance): millimetres once any env has been near its start pose, e.g.
+    right after a reset (offsets <= 0.02 rad per joint). One latch per env instance, shared by the success check
+    and the ``return_home`` reward, so the two always agree. The FrameTransformer is only refreshed by a sim step,
+    which is why nothing is read inside the reset itself.
+    """
+    tcp = env.scene[ee_frame_cfg.name].data.target_pos_w.torch[:, 0, :] - env.scene.env_origins
+    joint_distance = arm_home_distance(env, arm_cfg)
+    best, i = joint_distance.min(dim=0)
+    latch = getattr(env, "_home_tcp_latch", None)
+    if latch is None:
+        latch = env._home_tcp_latch = {"distance": torch.full_like(best, float("inf")), "tcp": tcp[i].clone()}
+    better = best < latch["distance"]  # tensor ops only: no GPU sync per step
+    latch["distance"] = torch.where(better, best, latch["distance"])
+    latch["tcp"] = torch.where(better, tcp[i], latch["tcp"])
+    return torch.linalg.vector_norm(tcp - latch["tcp"], dim=-1)
 
 
 REL_SPEED_THRESHOLD = 0.05
@@ -121,8 +150,8 @@ def never(env: ManagerBasedRLEnv) -> torch.Tensor:
 class food_in_bowl(ManagerTermBase):
     """Success: food inside the target bowl, released, and at rest relative to the bowl for ``settle_steps``.
 
-    With ``home_tolerance`` set (env option ``success_requires_home``) it additionally requires the arm joints
-    within ``home_tolerance`` [rad, L2] of the default pose (``arm_home_distance``): the episode ends only once the
+    With ``home_tolerance`` set (env option ``success_requires_home``) it additionally requires the TCP within
+    ``home_tolerance`` [m] of its home position (``tcp_home_distance``): the episode ends only once the
     food is placed AND the arm is back home. The settle counter keeps counting meanwhile, so success fires on the
     first step the arm is home after the food has settled. Unset (the default), nothing changes."""
 
@@ -152,6 +181,7 @@ class food_in_bowl(ManagerTermBase):
         bowl_cfg: SceneEntityCfg = SceneEntityCfg("bowl"),
         home_tolerance: float | None = None,
         arm_cfg: SceneEntityCfg | None = None,
+        ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     ) -> torch.Tensor:
         inside = settled_in_bowl_mask(
             env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos,
@@ -161,4 +191,4 @@ class food_in_bowl(ManagerTermBase):
         placed = self.counter >= settle_steps
         if home_tolerance is None:
             return placed
-        return placed & (arm_home_distance(env, arm_cfg) <= home_tolerance)
+        return placed & (tcp_home_distance(env, arm_cfg, ee_frame_cfg) <= home_tolerance)

@@ -1,9 +1,11 @@
-"""v3 semantics (success_requires_home): success = food settled in the bowl AND the arm back home.
+"""v3 semantics (success_requires_home): success = food settled in the bowl AND the TCP back home.
 
-Env 0: the arm is teleported 0.5 rad away from its default pose (joint 1) and the food is teleported to rest in the
-bowl; the success termination must not fire although the food settles (its counter passes settle_steps + 5), while
-``return_home`` and ``food_in_bowl`` pay. Then the arm is written back to the default pose and success must fire
-within a few steps. Env 1 is an untouched control. At reset every env's arm counts as home.
+Home = the TCP within home_tolerance [m] of its home position (``mdp.tcp_home_distance``). The first steps drive
+both arms to their default joint pose (and let the home latch see it); every env's TCP must then count as home.
+Env 0: joint 1 is teleported 0.5 rad away from its default (the TCP swings ~0.2 m sideways) and the food is
+teleported to rest in the bowl; the success termination must not fire although the food settles (its counter passes
+settle_steps + 5), while ``return_home`` and ``food_in_bowl`` pay. Then the arm is written back to the default
+joints and success must fire within a few steps. Env 1 is an untouched control.
 
 Runs in ``joint_pos`` action mode so the arm's joint targets are exactly what the scenario writes (the arm action
 ``a`` targets ``default + scale * a``); with the IK action the controller's target would depend on when the
@@ -25,7 +27,7 @@ from food_robot.config import build_cell_env_cfg  # noqa: E402
 from food_robot.envs import mdp  # noqa: E402
 
 N = 2
-FAR = 0.5  # [rad] offset of joint 1 in phase (a): well outside home_tolerance
+FAR = 0.5  # [rad] offset of joint 1 in phase (a): moves the TCP well outside home_tolerance
 ENV = {
     "num_envs": N,
     "cameras": False,
@@ -56,9 +58,6 @@ def main():
     def component(term):  # unweighted per-second value of a dense term (Isaac Lab stores value x weight)
         return rm._step_reward[:, names.index(term)] / rm.get_term_cfg(term).weight
 
-    # (c) at reset every arm is within home_tolerance of the default pose
-    reset_distance = mdp.arm_home_distance(u, arm_cfg).tolist()
-
     scale = cfg.arm.joint_action_scale
     action = torch.zeros(N, u.action_manager.total_action_dim, device=device)
     action[:, -1] = 1.0  # binary gripper: positive = open
@@ -69,8 +68,14 @@ def main():
         robot.write_joint_velocity_to_sim_index(velocity=torch.zeros_like(q), joint_ids=joint_ids, env_ids=env0)
         robot.set_joint_position_target_index(target=q, joint_ids=joint_ids, env_ids=env0)
 
-    for _ in range(5):
+    # (c) start pose: joint_pos action 0 drives both arms from default + reset offset to the default joints
+    first_step_distance = None
+    for _ in range(10):
         env.step(action)
+        if first_step_distance is None:  # reported only: the arms still carry their reset offsets here
+            first_step_distance = mdp.tcp_home_distance(u, arm_cfg).tolist()
+    reset_distance = mdp.tcp_home_distance(u, arm_cfg).tolist()
+    latch_joint_distance = float(u._home_tcp_latch["distance"])  # joint distance [rad] of the latched sample
 
     # (a) arm far from home, food at rest in the bowl
     far = default[:1].clone()
@@ -95,7 +100,7 @@ def main():
         other_done |= bool(terminated[0] | truncated[0])
         home_max = torch.maximum(home_max, component("return_home").cpu())
         in_bowl_max = torch.maximum(in_bowl_max, component("food_in_bowl").cpu())
-        away_distance_min = min(away_distance_min, float(mdp.arm_home_distance(u, arm_cfg)[0]))
+        away_distance_min = min(away_distance_min, float(mdp.tcp_home_distance(u, arm_cfg)[0]))
     counter_away = int(success_term.counter[0])
 
     # (b) arm back at the default pose: success must fire within a few steps
@@ -113,6 +118,8 @@ def main():
         home_tolerance=tol,
         settle_steps=settle_steps,
         reset_distance=reset_distance,
+        first_step_distance=first_step_distance,
+        latch_joint_distance=latch_joint_distance,
         fired_away=fired_away,
         env0_done_while_away=other_done,
         counter_away=counter_away,

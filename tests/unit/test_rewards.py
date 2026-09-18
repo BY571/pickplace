@@ -63,7 +63,7 @@ def test_env_options_home_defaults_and_unknown_keys_raise():
     from food_robot.config import DEFAULT_ENV, build_cell_env_cfg
 
     assert DEFAULT_ENV["success_requires_home"] is False  # every existing config keeps today's success
-    assert DEFAULT_ENV["home_tolerance"] > 0.02 * 7**0.5  # every randomised start pose counts as home
+    assert DEFAULT_ENV["home_tolerance"] == 0.05  # [m], TCP distance to its home position
     with pytest.raises(ValueError, match="succes_requires_home"):
         build_cell_env_cfg({"succes_requires_home": True})
 

@@ -25,7 +25,7 @@ def test_reward_vector_reproduces_isaac_lab_reward_and_specs(run_scenario):
     assert home[3] > 0
     assert all(v == 0.0 for i, v in enumerate(home) if i != 3)
     # success_requires_home false (the default): the success termination is exactly the pre-v3 one
-    assert "home_tolerance" not in r["success_params"] and "arm_cfg" not in r["success_params"]
+    assert r["success_home_tolerance"] is None
 
 
 def test_reward_set_switch_changes_the_scalar_only(run_scenario):

@@ -7,11 +7,11 @@ defaults:
 
 env:
   reward_set: simple_v3        # food_robot/reward_sets/simple_v3.yaml (return_home + motion penalties)
-  success_requires_home: true  # success needs the arm within env home_tolerance (default 0.15 rad) of home
+  success_requires_home: true  # success needs the TCP within env home_tolerance (default 0.05 m) of home
 
 collector:
-  total_frames: 1_000_000_000  # upper bound; early stop (4 evals in a row >= 0.85 success, where eval success
-                               # now means placed AND home) normally ends the run sooner
+  total_frames: 600_000_000    # the schedule that just worked (also the LR horizon); early stop (4 evals in a row
+                               # >= 0.85 success, eval success = placed AND home) normally ends it sooner
 
 logger:
   exp_name: state_teacher_v3

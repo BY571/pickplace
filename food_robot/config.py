@@ -26,9 +26,9 @@ DEFAULT_ENV: dict = {
     "bowl_failure_penalty": None,
     "food_drop_penalty": None,
     "success_settle_steps": 5,
-    # Success also requires the arm back within home_tolerance [rad] of its default pose (FoodCellEnvCfg).
+    # Success also requires the TCP back within home_tolerance [m] of its home position (FoodCellEnvCfg).
     "success_requires_home": False,
-    "home_tolerance": 0.15,
+    "home_tolerance": 0.05,
     "ingredient_bowl_pos": [0.45, -0.10, 0.0],
     # Fixed as of task 14 (was [0.35, 0.55] / [-0.20, 0.00]): the food is randomized inside the wider supply
     # tray instead (RigidFoodCfg.spawn_range), so the container itself no longer needs its own position DR.

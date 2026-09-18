@@ -99,7 +99,7 @@ def test_teacher_v3_config_trains(tmp_path):
     assert len(_lines(proc.stdout, "METRICS ")) == 4, tail
     config = json.loads((tmp_path / "run" / "manifest.json").read_text())["config"]
     assert config["env"]["reward_set"] == "simple_v3" and config["env"]["success_requires_home"] is True
-    assert config["collector"]["total_frames"] == 1_000_000_000 and config["logger"]["exp_name"] == "state_teacher_v3"
+    assert config["collector"]["total_frames"] == 600_000_000 and config["logger"]["exp_name"] == "state_teacher_v3"
     # everything else comes from config.yaml
     assert config["network"]["hidden"] == [512, 256, 128] and config["env"]["action_mode"] == "ee_delta_pose"
 

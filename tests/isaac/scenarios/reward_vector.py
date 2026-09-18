@@ -81,7 +81,7 @@ def main():
     in_bowl_max = torch.zeros(N)
     home_idx = REWARD_TERMS.index("return_home")
     home_max = torch.zeros(N)
-    success_params = sorted(u.termination_manager.get_term_cfg("success").params)
+    success_home_tolerance = u.termination_manager.get_term_cfg("success").params.get("home_tolerance")
 
     td = env.reset()
     max_diff = max_sparse = max_sum_diff = 0.0
@@ -133,7 +133,7 @@ def main():
         max_abs_term_sum_diff=max_sum_diff,
         food_in_bowl_max=in_bowl_max.tolist(),
         return_home_max=home_max.tolist(),
-        success_params=success_params,
+        success_home_tolerance=success_home_tolerance,
     )
 
 

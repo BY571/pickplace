@@ -29,4 +29,5 @@ from food_robot.envs.mdp.terminations import (
     food_off_table,
     never,
     settled_in_bowl_mask,
+    tcp_home_distance,
 )

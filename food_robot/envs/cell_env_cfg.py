@@ -203,10 +203,10 @@ class RewardsCfg:
     action_rate = RewTerm(func=base_mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=base_mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
     food_in_bowl = RewTerm(func=mdp.released_in_bowl, weight=1.0, params={})  # params set by _build_food_terms
-    # std 1.0 rad: the arm's placing pose over the belt is roughly 1 rad (joint-space L2) from the default pose, so
-    # the term still pays ~0.2 and has a usable slope right after the release; 0.5 would saturate near 0 there.
-    # At home_tolerance (0.15 rad) it pays ~0.85.
-    return_home = RewTerm(func=mdp.return_home, weight=1.0, params={"std": 1.0})  # rest set by _build_food_terms
+    # std 0.2 m (TCP distance to its home position): ~0.76 at home_tolerance (0.05 m), ~0.15 at 0.25 m, fading out
+    # (<0.05) beyond ~0.4 m, roughly where the hand is when it releases over the belt; success (150) rewards the
+    # final approach anyway.
+    return_home = RewTerm(func=mdp.return_home, weight=1.0, params={"std": 0.2})  # rest set by _build_food_terms
 
 
 @configclass
@@ -284,12 +284,12 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     """Return subtracted once when the food falls off the table."""
     success_settle_steps: int = 5
     success_requires_home: bool = False
-    """Success = food settled in the bowl AND the arm joints within ``home_tolerance`` of the default pose (see
+    """Success = food settled in the bowl AND the TCP within ``home_tolerance`` of its home position (see
     ``mdp.food_in_bowl``). False: success as before (settled in the bowl only)."""
-    home_tolerance: float = 0.15
-    """Radius of "at home" [rad, L2 over the arm joints, fingers excluded]. ``reset_robot_joints`` offsets each of the
-    7 arm joints by U(-0.02, 0.02), so a fresh start is at most 0.02 * sqrt(7) ~= 0.053 rad from the default pose;
-    0.15 (~3x) counts every start pose as home with margin, while still being ~0.06 rad (~3 deg) per joint."""
+    home_tolerance: float = 0.05
+    """Radius of "at home" [m]: TCP distance to the TCP position at the default joint pose (``mdp.tcp_home_distance``;
+    end-effector space, since the IK policy cannot steer the redundant elbow). ``reset_robot_joints`` offsets each arm
+    joint by U(-0.02, 0.02) rad, which moves the TCP ~1-2 cm (estimated), so start poses count as home."""
     demo: bool = False
     """Continuous-demo scene (``pipeline/0_state_teacher/demo.py``), never used for training: ``demo_bowls``
     pallet+bowl pairs spaced ``demo_spacing`` apart on the belt, ``demo_food_pool`` spare food items parked under

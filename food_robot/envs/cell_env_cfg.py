@@ -46,6 +46,31 @@ from food_robot.timing import (
 ActionMode = Literal["ee_delta_pose", "joint_pos"]
 
 
+# GPU buffer capacities that grow with the number of envs. The values set in FoodCellEnvCfg.__post_init__ (or
+# PhysX's defaults) are validated at VALIDATED_NUM_ENVS; above that they are scaled linearly.
+VALIDATED_NUM_ENVS = 4096
+SCALED_PHYSX_FIELDS: tuple[str, ...] = (
+    "gpu_total_aggregate_pairs_capacity",
+    "gpu_found_lost_aggregate_pairs_capacity",
+    "gpu_found_lost_pairs_capacity",
+    "gpu_max_rigid_contact_count",
+    "gpu_max_rigid_patch_count",
+)
+
+
+def scale_physx_buffers(physics_cfg, num_envs: int) -> None:
+    """Scale PhysX GPU buffer capacities linearly with ``num_envs`` above ``VALIDATED_NUM_ENVS`` (in place).
+
+    Capacities are rounded up to a power of two. Below the validated size nothing changes.
+    """
+    factor = num_envs / VALIDATED_NUM_ENVS
+    if factor <= 1.0:
+        return
+    for name in SCALED_PHYSX_FIELDS:
+        base = int(getattr(physics_cfg, name))
+        setattr(physics_cfg, name, 1 << math.ceil(math.log2(base * factor)))
+
+
 @configclass
 class FoodCellSceneCfg(InteractiveSceneCfg):
     robot: ArticulationCfg = MISSING
@@ -268,10 +293,11 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics = PhysxCfg(
             bounce_threshold_velocity=0.01,
             gpu_found_lost_aggregate_pairs_capacity=1024 * 1024 * 4,
-            # 16*1024 overflowed at num_envs=4096 (measured on the Spark 2026-09-15: PhysX asked for up
-            # to ~16,883 vs. a 16,384 capacity, ~118 "PxgAABBManager.cpp" errors over a 5-iteration PPO
-            # run). Raised to 32*1024 for headroom; see sota-implementations/ppo/README.md.
-            gpu_total_aggregate_pairs_capacity=32 * 1024,
+            # Validated at VALIDATED_NUM_ENVS=4096 (scale_physx_buffers scales it above). 16*1024 overflowed
+            # (Spark 2026-09-15: ~16,883 requested, ~118 "PxgAABBManager.cpp" errors in 5 PPO iterations);
+            # 32*1024 overflowed too (Spark 2026-09-18, 4096 envs: ~33.2k requested, ~25k errors in one
+            # teacher run; missed contacts dropped bowls through the pallet). 64*1024 leaves ~2x headroom.
+            gpu_total_aggregate_pairs_capacity=64 * 1024,
             friction_correlation_distance=0.00625,
         )
         validate_observation_flags(self.cameras, self.privileged_information)

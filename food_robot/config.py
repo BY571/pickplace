@@ -71,7 +71,7 @@ def _geometry_kwargs(belt_kwargs: dict) -> dict:
 def build_cell_env_cfg(env_cfg: Mapping):
     """Merge ``env_cfg`` over ``DEFAULT_ENV`` and construct the Isaac Lab env config."""
     from food_robot.belt import BeltCfg
-    from food_robot.envs.cell_env_cfg import FoodCellEnvCfg
+    from food_robot.envs.cell_env_cfg import FoodCellEnvCfg, scale_physx_buffers
     from food_robot.rewards import DENSE_TERMS, isaac_weight, resolve_reward_weights
 
     unknown = set(env_cfg) - set(DEFAULT_ENV)
@@ -107,6 +107,7 @@ def build_cell_env_cfg(env_cfg: Mapping):
         render_image_size=tuple(c["render_image_size"]),
     )
     cfg.scene.num_envs = int(c["num_envs"])
+    scale_physx_buffers(cfg.sim.physics, cfg.scene.num_envs)
     cfg.seed = c["seed"]
     cfg.sim.device = c["device"]
     for term in DENSE_TERMS:

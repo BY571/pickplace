@@ -192,7 +192,9 @@ def main(cfg: DictConfig):
                 category=UserWarning,
             )
             update = CudaGraphModule(update, in_keys=[], out_keys=[], warmup=5)
-            adv_module = CudaGraphModule(adv_module)
+            # Unlike ppo_mujoco.py, GAE is not graph-captured: under native auto-reset ("next", obs) is NaN on
+            # done rows, and GAE's NaN sanitisation (ValueEstimatorBase._sanitize_next_obs_nan) branches on
+            # `nan_mask.any()` on the host, which invalidates the capture (cudaErrorStreamCaptureInvalidated).
 
         logger = None
         if cfg.logger.backend:

@@ -2,7 +2,7 @@
 # Values marked "benchmark" are set by Task 6 from docs/experiments/pipeline_stage0/benchmark.
 env:
   task: FoodRobot-Cell-v0
-  num_envs: 4096             # benchmark
+  num_envs: 32768            # benchmark (docs/experiments/pipeline_stage0/benchmark)
   arm: franka
   food: rigid
   action_mode: ee_delta_pose
@@ -36,7 +36,7 @@ network:
   hidden: [512, 256, 128]
 
 collector:
-  rollout_steps: 24          # benchmark
+  rollout_steps: 16          # benchmark (docs/experiments/pipeline_stage0/benchmark)
   total_frames: 200_000_000  # also the LR annealing horizon
 
 max_iterations: null         # overrides total_frames when set
@@ -56,11 +56,12 @@ loss:
   gamma: 0.99
   gae_lambda: 0.95
   ppo_epochs: 4
-  mini_batch_size: 32768     # benchmark
+  mini_batch_size: 131072    # benchmark (docs/experiments/pipeline_stage0/benchmark)
   clip_epsilon: 0.2
   entropy_coeff: 0.005
   critic_coeff: 0.5
-  shifted_gae: false         # GAE(shifted=True): one critic call over obs_0..obs_T instead of obs and next obs
+  shifted_gae: true          # benchmark (docs/experiments/pipeline_stage0/benchmark)
+                             # GAE(shifted=True): one critic call over obs_0..obs_T instead of obs and next obs
 
 compile:                     # torch.compile wiring as in TorchRL's sota-implementations/ppo/ppo_mujoco.py
   compile: false             # compile the PPO update, GAE and the collector's policy call

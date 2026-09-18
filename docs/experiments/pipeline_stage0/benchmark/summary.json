@@ -1,0 +1,24 @@
+{
+  "total_memory_gb": 121.7,
+  "budget_gb": 86.4,
+  "reserve_gb": 11.0,
+  "selected": {
+    "name": "C_shifted_gae",
+    "num_envs": 32768,
+    "rollout_steps": 16,
+    "mini_batch_size": 131072,
+    "options": {
+      "loss.shifted_gae": "true"
+    },
+    "frames_per_hour": 278238444.0,
+    "peak_used_gb": 67.77,
+    "reserve_gb": 11.0,
+    "hours_for_200M": 0.7,
+    "suggested": {
+      "env.num_envs": 32768,
+      "collector.rollout_steps": 16,
+      "loss.mini_batch_size": 131072,
+      "loss.shifted_gae": "true"
+    }
+  }
+}

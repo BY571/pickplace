@@ -393,6 +393,8 @@ def plot(rows, out, total_gb, budget):
 
     sns.set()
     df = pd.DataFrame([r for r in rows if r["status"] == "ok"])
+    for column in ("num_envs", "rollout_steps", "mini_batch_size"):  # rows resumed from the CSV hold strings
+        df[column] = pd.to_numeric(df[column])
     a = df[(df.phase == "A")].copy()
     x = df[df.phase.isin(["A", "X"])].copy()
     b = df[df.phase == "B"].copy()
@@ -420,6 +422,7 @@ def plot(rows, out, total_gb, budget):
         sns.lineplot(x=a.num_envs.astype(int), y=a[column].astype(float), label=label, linewidth=2.5, marker="o", ax=ax)
         ax.set_xscale("log", base=2)
         ax.xaxis.set_major_formatter(thousands)
+        ax.yaxis.set_major_formatter(thousands)
         finish(ax, title, "Parallel envs", ylabel)
     i = 2
     names = {"raw": "Isaac Lab gym env", "wrapper": "+ IsaacLabWrapper", "env": "+ transforms (make_env)",
@@ -430,7 +433,7 @@ def plot(rows, out, total_gb, budget):
         s = x[x.num_envs.astype(int).isin(split_sizes) & x.kind.isin(list(names))].copy()
         s["Stage"] = pd.Categorical(s.kind.map(names), categories=list(names.values()), ordered=True)
         s["Envs"] = s.num_envs.astype(int).map(lambda v: f"{v:,} envs")
-        s = s.sort_values(["Stage", "num_envs"])
+        s = s.sort_values(["num_envs", "Stage"])
         s["steps"] = s.env_steps_per_s.astype(float)
         labels = {}
         for envs, group in s.groupby("Envs"):

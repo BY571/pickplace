@@ -34,3 +34,5 @@ Stop gracefully (final checkpoint, evaluation and video are still written):
     ./scripts/spark.sh --detach python pipeline/0_state_teacher/benchmark.py
 
 See `docs/experiments/pipeline_stage0/benchmark/`.
+Selected (2026-09-18): 32,768 envs, rollout 16, minibatch 131,072, `loss.shifted_gae=true` -> 278 M frames/hour
+(4,096 envs x 24: ~160 M/h).

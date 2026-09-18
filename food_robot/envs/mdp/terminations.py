@@ -73,6 +73,42 @@ def released_in_bowl_mask(
     return radial_ok & height_ok & released
 
 
+REL_SPEED_THRESHOLD = 0.05
+"""Food-to-bowl speed [m/s] below which the food counts as at rest in the bowl (``settled_in_bowl_mask``)."""
+
+
+def settled_in_bowl_mask(
+    env: ManagerBasedRLEnv,
+    inner_radius: float,
+    base_thickness: float,
+    rim_height: float,
+    item_radius: float,
+    robot_cfg: SceneEntityCfg,
+    open_pos: float,
+    closed_pos: float,
+    food_cfg: SceneEntityCfg,
+    bowl_cfg: SceneEntityCfg,
+    rel_speed_threshold: float = REL_SPEED_THRESHOLD,
+) -> torch.Tensor:
+    """``released_in_bowl_mask`` and moving slower than ``rel_speed_threshold`` relative to the bowl.
+
+    One step of the ``food_in_bowl`` success condition (which additionally requires it for ``settle_steps``
+    consecutive steps); the continuous demo counts placements with the same function.
+    """
+    food, bowl = env.scene[food_cfg.name].data, env.scene[bowl_cfg.name].data
+    in_bowl = released_in_bowl_mask(
+        env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos,
+        food_cfg, bowl_cfg,
+    )
+    rel_speed = torch.linalg.vector_norm(food.root_lin_vel_w.torch - bowl.root_lin_vel_w.torch, dim=-1)
+    return in_bowl & (rel_speed < rel_speed_threshold)
+
+
+def never(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """A termination that never fires (the continuous demo disables every episode end with it)."""
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+
 class food_in_bowl(ManagerTermBase):
     """Success: food inside the target bowl, released, and at rest relative to the bowl for ``settle_steps``."""
 
@@ -97,16 +133,13 @@ class food_in_bowl(ManagerTermBase):
         robot_cfg: SceneEntityCfg,
         open_pos: float,
         closed_pos: float,
-        rel_speed_threshold: float = 0.05,
+        rel_speed_threshold: float = REL_SPEED_THRESHOLD,
         food_cfg: SceneEntityCfg = SceneEntityCfg("food"),
         bowl_cfg: SceneEntityCfg = SceneEntityCfg("bowl"),
     ) -> torch.Tensor:
-        food, bowl = env.scene[food_cfg.name].data, env.scene[bowl_cfg.name].data
-        in_bowl = released_in_bowl_mask(
+        inside = settled_in_bowl_mask(
             env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos,
-            food_cfg, bowl_cfg,
+            food_cfg, bowl_cfg, rel_speed_threshold,
         )
-        rel_speed = torch.linalg.vector_norm(food.root_lin_vel_w.torch - bowl.root_lin_vel_w.torch, dim=-1)
-        inside = in_bowl & (rel_speed < rel_speed_threshold)
         self.counter = torch.where(inside, self.counter + 1, torch.zeros_like(self.counter))
         return self.counter >= settle_steps

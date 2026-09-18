@@ -39,3 +39,11 @@ class BeltCfg:
 
     def entry_x(self) -> float:
         return self.zone().start_x - self.entry_margin
+
+    def visual_length(self) -> float:
+        """Length of the drawn belt strip, centred on ``zone_center_x``."""
+        return self.zone().length + 2 * self.entry_margin + 0.6
+
+    def end_x(self) -> float:
+        """Downstream end of the drawn belt strip (cell frame)."""
+        return self.zone_center_x + 0.5 * self.visual_length()

@@ -32,6 +32,7 @@ from food_robot.arms import FRANKA_CFG, ArmCfg
 from food_robot.assets.scene_assets import make_bowl_cfg, make_pallet_cfg
 from food_robot.assets.usd_builders import BowlGeometry
 from food_robot.belt import BeltCfg
+from food_robot.carousel import carousel_layout, park_position
 from food_robot.envs import mdp
 from food_robot.food import FoodSourceCfg, RigidFoodCfg
 from food_robot.timing import (
@@ -278,6 +279,21 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     food_drop_penalty: float = 150.0
     """Return subtracted once when the food falls off the table."""
     success_settle_steps: int = 5
+    demo: bool = False
+    """Continuous-demo scene (``pipeline/0_state_teacher/demo.py``), never used for training: ``demo_bowls``
+    pallet+bowl pairs spaced ``demo_spacing`` apart on the belt, ``demo_food_pool`` spare food items parked under
+    the table, and every termination (time-out included) disabled so the robot is never reset. The primary
+    ``pallet``/``bowl``/``food`` keep their names (so every observation and reward term still builds); the
+    extra ones are ``pallet_<i>``/``bowl_<i>``/``food_<j>``. False leaves the training scene untouched."""
+    demo_bowls: int = 3
+    demo_food_pool: int = 5
+    """Spare food items besides ``food``: bowls leaving with food in them hold on to it until they are recycled."""
+    demo_spacing: float | None = None
+    """Distance between consecutive demo pallets [m]; None fills the belt evenly (see ``carousel_layout``)."""
+    demo_recycle_q: float = 0.0
+    """Set in demo mode: pallet joint position at which a pallet is written back to the entry."""
+    demo_termination_params: dict = {}
+    """Set in demo mode: each termination's original params, before it was replaced by ``never``."""
 
     # --- managers ---
     scene: FoodCellSceneCfg = FoodCellSceneCfg(num_envs=64, env_spacing=2.5)
@@ -340,6 +356,8 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self._build_events()
         self._build_belt_terms(zone)
         self._build_food_terms()
+        if self.demo:
+            self._build_demo(zone)
 
     # ------------------------------------------------------------------
     def _build_scene(self, zone) -> None:
@@ -370,7 +388,7 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             prim_path="{ENV_REGEX_NS}/BeltVisual",
             init_state=AssetBaseCfg.InitialStateCfg(pos=(belt.zone_center_x, belt.belt_y, base_z - 0.004)),
             spawn=sim_utils.CuboidCfg(
-                size=(zone.length + 2 * belt.entry_margin + 0.6, 2 * belt.belt_half_width, 0.004),
+                size=(belt.visual_length(), 2 * belt.belt_half_width, 0.004),
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.08, 0.08, 0.08)),
             ),
         )
@@ -555,3 +573,54 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         self.rewards.place_success.weight = self.success_bonus / step_dt
         self.rewards.bowl_failure.weight = -self.bowl_failure_penalty / step_dt
         self.rewards.food_dropped.weight = -self.food_drop_penalty / step_dt
+
+    def _build_demo(self, zone) -> None:
+        belt, s = self.belt, self.scene
+        if self.demo_food_pool < self.demo_bowls:
+            raise ValueError(
+                f"demo_food_pool={self.demo_food_pool} < demo_bowls={self.demo_bowls}: every bowl can leave with "
+                "one food item, so the pool needs at least one spare item per bowl."
+            )
+        layout = carousel_layout(
+            self.demo_bowls,
+            entry_x=belt.entry_x(),
+            belt_end_x=belt.end_x(),
+            zone_end_x=zone.end_x,
+            pallet_length=belt.pallet.size[0],
+            bowl_outer_radius=belt.bowl.inner_radius + belt.bowl.wall_thickness,
+            travel_upper=belt.pallet.travel_upper,
+            spacing=self.demo_spacing,
+        )
+        self.demo_spacing, self.demo_recycle_q = layout.spacing, layout.recycle_q
+        base_z = belt.plate_top_z - belt.pallet.size[2]
+        for i, q in enumerate(layout.start_q):
+            suffix = "" if i == 0 else f"_{i}"
+            pallet = make_pallet_cfg(
+                belt.pallet, f"{{ENV_REGEX_NS}}/Pallet{suffix}", (belt.entry_x(), belt.belt_y, base_z), belt.pallet_damping
+            )
+            pallet.init_state.joint_pos = {"slider": q}
+            bowl_pos = (belt.entry_x() + q, belt.belt_y, belt.plate_top_z + 0.002)
+            setattr(s, f"pallet{suffix}", pallet)
+            setattr(s, f"bowl{suffix}", make_bowl_cfg(belt.bowl, f"{{ENV_REGEX_NS}}/Bowl{suffix}", bowl_pos, kinematic=False))
+        ground_z = s.plane.init_state.pos[2]
+        for j in range(1, self.demo_food_pool + 1):
+            pos = park_position(j, ground_z, self.food.item_radius)
+            setattr(
+                s,
+                f"food_{j}",
+                self.food.asset.replace(
+                    prim_path=f"{{ENV_REGEX_NS}}/Food_{j}", init_state=RigidObjectCfg.InitialStateCfg(pos=pos)
+                ),
+            )
+            # the spare items get the same startup material/mass randomization as the primary one
+            for name, term in self.food.events.items():
+                if term.mode == "startup" and "asset_cfg" in term.params:
+                    spare = copy.deepcopy(term)
+                    spare.params["asset_cfg"] = SceneEntityCfg(f"food_{j}")
+                    setattr(self.events, f"{name}_{j}", spare)
+        # no episode ever ends: every termination is replaced by `never`; its params stay available to the demo
+        self.demo_termination_params = {}
+        for name, term in vars(self.terminations).items():
+            if isinstance(term, DoneTerm):
+                self.demo_termination_params[name] = copy.deepcopy(term.params)
+                term.func, term.params = mdp.never, {}

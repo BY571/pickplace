@@ -42,7 +42,12 @@ DEFAULT_ENV: dict = {
     "reward_set": "staged_v1",
     "reward_weights": {},
     "food_params": {},
+    # Continuous demo (pipeline/0_state_teacher/demo.py only): None = the training scene; a mapping with any of
+    # {bowls, food_pool, spacing} builds the demo scene (see FoodCellEnvCfg.demo).
+    "demo": None,
 }
+
+DEMO_KEYS = {"bowls": "demo_bowls", "food_pool": "demo_food_pool", "spacing": "demo_spacing"}
 
 
 def _resolve(registry: dict[str, str], name: str, kind: str):
@@ -83,6 +88,13 @@ def build_cell_env_cfg(env_cfg: Mapping):
     food_cls = _resolve(FOODS, c["food"], "food")
     food = food_cls(**_tuples(c["food_params"]))
 
+    demo = {}
+    if c["demo"] is not None:
+        unknown_demo = set(c["demo"]) - set(DEMO_KEYS)
+        if unknown_demo:
+            raise ValueError(f"Unknown demo keys {sorted(unknown_demo)}. Allowed: {sorted(DEMO_KEYS)}")
+        demo = {"demo": True, **{DEMO_KEYS[k]: v for k, v in c["demo"].items() if v is not None}}
+
     cfg = FoodCellEnvCfg(
         arm=arm,
         food=food,
@@ -105,6 +117,7 @@ def build_cell_env_cfg(env_cfg: Mapping):
         render_cam_eye=tuple(c["render_cam_eye"]),
         render_cam_target=tuple(c["render_cam_target"]),
         render_image_size=tuple(c["render_image_size"]),
+        **demo,
     )
     cfg.scene.num_envs = int(c["num_envs"])
     scale_physx_buffers(cfg.sim.physics, cfg.scene.num_envs)

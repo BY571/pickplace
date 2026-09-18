@@ -22,4 +22,4 @@ from food_robot.envs.mdp.rewards import (
     termination_indicator,
     transport_to_bowl,
 )
-from food_robot.envs.mdp.terminations import food_in_bowl, food_off_table
+from food_robot.envs.mdp.terminations import food_in_bowl, food_off_table, never, settled_in_bowl_mask

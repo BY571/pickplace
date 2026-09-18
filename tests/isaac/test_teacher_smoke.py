@@ -92,12 +92,14 @@ def test_teacher_trains_with_compile_and_shifted_gae(tmp_path):
 
 def test_teacher_early_stop_saves_final_checkpoint(tmp_path):
     proc, tail = _train(
-        tmp_path, "max_iterations=40", "checkpoint.interval_frames=0", "worker.enabled=false",
-        "early_stop.success_rate=0.0", "early_stop.consecutive_iterations=2",
+        tmp_path, "max_iterations=200", "checkpoint.interval_frames=512",
+        "worker.enabled=true", "worker.eval_num_envs=16", "worker.render=false",
+        "early_stop.success_rate=0.0", "early_stop.consecutive_evals=1",
+        timeout=3600,
     )
     assert "PPO_DONE" in proc.stdout, tail
     assert _lines(proc.stdout, "STOP_REASON ")[-1]["reason"] == "early_stop"
-    assert len(_lines(proc.stdout, "METRICS ")) < 40
+    assert len(_lines(proc.stdout, "METRICS ")) < 200
     assert (tmp_path / "run" / "checkpoints" / "ppo_teacher_final.pt").exists()
 
 

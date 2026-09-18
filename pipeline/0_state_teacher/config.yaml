@@ -43,8 +43,9 @@ max_iterations: null         # overrides total_frames when set
 max_hours: null              # stop cleanly (final checkpoint) after this much wall time
 
 early_stop:
-  success_rate: 0.85         # stop once the training success rate reaches this for
-  consecutive_iterations: 10 # this many iterations in a row; success_rate: null disables
+  success_rate: 0.85       # stop once eval success rate (worker.enabled required) reaches this for
+  consecutive_evals: 4     # this many evaluations in a row (evals every checkpoint.interval_frames = 10 M
+                            # frames -> 4 in a row ~= 40 M frames); success_rate: null disables
 
 optim:
   lr: 3.0e-4

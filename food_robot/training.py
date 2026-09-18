@@ -48,7 +48,7 @@ def first_episode_metrics(data: TensorDictBase, prefix: str) -> dict[str, float]
 
 
 class SuccessStreak:
-    """Consecutive iterations whose training success rate reached ``threshold`` (early stopping)."""
+    """Consecutive updates whose success rate reached ``threshold`` (early stopping)."""
 
     def __init__(self, threshold: float, required: int):
         self.threshold, self.required, self.count = threshold, int(required), 0

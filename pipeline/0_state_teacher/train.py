@@ -222,15 +222,36 @@ def main(cfg: DictConfig):
 
     worker = tu.CheckpointWorker(run_dir, cfg.worker) if cfg.worker.enabled else None
 
-    def log_worker_results(metrics: dict, step: int) -> None:
-        """Merge finished checkpoint evaluations into ``metrics``; upload finished videos."""
+    early_stop_on = cfg.early_stop.success_rate is not None
+    if early_stop_on and worker is None:
+        print(
+            "[early_stop] worker.enabled=false: no evaluations will ever run, so early stopping on eval "
+            f"success rate (early_stop.success_rate={cfg.early_stop.success_rate}) cannot trigger; this run "
+            "will only stop on total_frames/max_hours/sigterm.",
+            flush=True,
+        )
+        early_stop_on = False
+    eval_streak = SuccessStreak(cfg.early_stop.success_rate or 0.0, cfg.early_stop.consecutive_evals)
+
+    def log_worker_results(metrics: dict, step: int) -> bool:
+        """Merge finished checkpoint evaluations into ``metrics``; upload finished videos.
+
+        Evaluations are merged in checkpoint-frame order (``worker.new_results()``'s order), and the eval
+        success streak is updated once per new evaluation. Returns whether the streak just reached the
+        early-stop threshold; callers past the point of deciding to stop (e.g. the exit pass) ignore this.
+        """
+        reached = False
         if worker is None:
-            return
+            return reached
         for kind, manifest in worker.new_results():
             if kind == "eval":
                 metrics.update({f"eval/{k}": v for k, v in manifest["eval"].items()})
                 metrics["eval/checkpoint_frames"] = manifest["frames"]
                 print("EVAL_LOGGED " + json.dumps({"checkpoint_frames": manifest["frames"], **manifest["eval"]}), flush=True)
+                just_reached = eval_streak.update(manifest["eval"].get("success_rate"))
+                metrics["eval/success_streak"] = eval_streak.count
+                if early_stop_on and just_reached:
+                    reached = True
             elif logger is not None and cfg.logger.backend == "wandb":
                 import wandb
 
@@ -239,6 +260,7 @@ def main(cfg: DictConfig):
                     {"eval/video": wandb.Video(str(video), format="mp4"), "eval/video_checkpoint_frames": manifest["frames"]},
                     step=step,
                 )
+        return reached
 
     checkpoints: list[str] = []
 
@@ -251,8 +273,6 @@ def main(cfg: DictConfig):
 
     stop = {"reason": "total_frames"}
     signal.signal(signal.SIGTERM, lambda *_: stop.update(reason="sigterm"))
-    early_stop_on = cfg.early_stop.success_rate is not None
-    success_streak = SuccessStreak(cfg.early_stop.success_rate or 0.0, cfg.early_stop.consecutive_iterations)
     interval = int(cfg.checkpoint.interval_frames)
 
     data_iter = iter(collector)
@@ -273,8 +293,6 @@ def main(cfg: DictConfig):
             frames_before, frames_total = frames_total, frames_total + data.numel()
             metrics = {"iteration": iteration}
             metrics.update(episode_metrics(data, "train"))
-            early_stop_reached = success_streak.update(metrics.get("train/success_rate"))
-            metrics["train/success_streak"] = success_streak.count
 
             t1 = time.perf_counter()
             data.set(("next", "reward"), data.get(("next", "reward")) * cfg.reward_scale)
@@ -323,7 +341,7 @@ def main(cfg: DictConfig):
                         group["lr"] = lr
             collector.update_policy_weights_()
 
-            log_worker_results(metrics, frames_total)
+            early_stop_reached = log_worker_results(metrics, frames_total)
             print("METRICS " + json.dumps({"frames": frames_total, **metrics}), flush=True)
             if logger is not None:
                 for key, value in metrics.items():
@@ -341,7 +359,7 @@ def main(cfg: DictConfig):
         raise
     finally:
         save("ppo_teacher_final", frames_total, iteration)
-        stop_info = {"reason": stop["reason"], "frames": frames_total, "success_streak": success_streak.count}
+        stop_info = {"reason": stop["reason"], "frames": frames_total, "eval_success_streak": eval_streak.count}
         print("STOP_REASON " + json.dumps(stop_info), flush=True)
         collector.shutdown()
         if worker is not None and cfg.worker.on_exit:

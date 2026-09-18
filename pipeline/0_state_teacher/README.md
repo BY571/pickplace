@@ -13,6 +13,10 @@ Stop gracefully (final checkpoint, evaluation and video are still written):
 
     ssh spark 'docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"'
 
+Early stopping (`early_stop.success_rate`) reads the background worker's **evaluation** success rate, not the
+training one: it stops once `early_stop.consecutive_evals` (4) evaluations in a row reach the threshold, so it
+needs `worker.enabled=true` (a warning is logged and early stopping is disabled otherwise).
+
 ## Outputs (`$FOOD_ROBOT_ARTIFACTS/teachers/<run>/`)
 
 - `manifest.json` — git commit, resolved config, W&B URL, start/end, stop reason, checkpoint list.

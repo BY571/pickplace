@@ -16,10 +16,14 @@
 |---|---|---|
 | `env.num_envs` | 4,096 | **32,768** |
 | `collector.rollout_steps` | 24 | **16** |
-| `loss.mini_batch_size` | 32,768 | **131,072** (4 minibatches per epoch) |
+| `loss.mini_batch_size` | 32,768 | **32,768** (16 minibatches per epoch; see note below) |
 | `loss.shifted_gae` | false | **true** |
 | frames per hour | ~160-167 M (measured in training) | **278 M** (+70%) |
 | frames per batch | 98,304 | 524,288 |
+
+Note (2026-09-18): the benchmark's throughput winner was minibatch 131,072 (273.9 M/h in Phase B). The config uses
+32,768 instead: only ~2% slower (268.7 M/h in Phase B) but 4x the gradient steps, so 200 M frames give ~24,400
+gradient steps, the same as the 4,096-env run that learned (W&B zpk5xfwg), instead of ~6,100.
 | peak memory | 16 GB | 67.8 GB (+ worker ~9 GB) |
 | 200 M frames | ~1.2 h | ~0.7 h |
 

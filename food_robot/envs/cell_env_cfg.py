@@ -291,17 +291,20 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     joint by U(-0.02, 0.02) rad, which moves the TCP ~1-2 cm (estimated), so start poses count as home."""
     demo: bool = False
     """Continuous-demo scene (``pipeline/0_state_teacher/demo.py``), never used for training: ``demo_bowls``
-    pallet+bowl pairs spaced ``demo_spacing`` apart on the belt, ``demo_food_pool`` spare food items parked under
-    the table, and every termination (time-out included) disabled so the robot is never reset. The primary
-    ``pallet``/``bowl``/``food`` keep their names (so every observation and reward term still builds); the
-    extra ones are ``pallet_<i>``/``bowl_<i>``/``food_<j>``. False leaves the training scene untouched."""
+    pallet+bowl pairs spaced ``demo_spacing`` apart on a belt (and table) extended upstream so bowls can queue,
+    ``demo_food_pool`` spare food items parked under the table, and every termination (time-out included) disabled
+    so the robot is never reset. The arm, supply tray, reach zone, belt end and belt speed are the training ones.
+    The primary ``pallet``/``bowl``/``food`` keep their names (so every observation and reward term still builds);
+    the extra ones are ``pallet_<i>``/``bowl_<i>``/``food_<j>``. False leaves the training scene untouched."""
     demo_bowls: int = 3
     demo_food_pool: int = 5
     """Spare food items besides ``food``: bowls leaving with food in them hold on to it until they are recycled."""
     demo_spacing: float | None = None
-    """Distance between consecutive demo pallets [m]; None fills the belt evenly (see ``carousel_layout``)."""
+    """Distance between consecutive demo pallets [m]; None: one reach-zone length per bowl (see ``carousel_layout``)."""
     demo_recycle_q: float = 0.0
-    """Set in demo mode: pallet joint position at which a pallet is written back to the entry."""
+    """Set in demo mode: pallet joint position of the belt end, where a pallet is written back to ``demo_entry_q``."""
+    demo_entry_q: float = 0.0
+    """Set in demo mode: pallet joint position where recycled pallets re-enter (upstream of the training entry)."""
     demo_termination_params: dict = {}
     """Set in demo mode: each termination's original params, before it was replaced by ``never``."""
 
@@ -602,18 +605,39 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
             self.demo_bowls,
             entry_x=belt.entry_x(),
             belt_end_x=belt.end_x(),
+            zone_length=zone.length,
             zone_end_x=zone.end_x,
+            earliest_start_q=belt.pallet_start_range[0],
             pallet_length=belt.pallet.size[0],
             bowl_outer_radius=belt.bowl.inner_radius + belt.bowl.wall_thickness,
-            travel_upper=belt.pallet.travel_upper,
             spacing=self.demo_spacing,
         )
-        self.demo_spacing, self.demo_recycle_q = layout.spacing, layout.recycle_q
+        self.demo_spacing, self.demo_recycle_q, self.demo_entry_q = layout.spacing, layout.recycle_q, layout.entry_q
+        # queued bowls wait upstream: extend the belt strip, the table and the pallets' joint range upstream only
+        # (arm, supply tray, reach zone, belt end and speed stay exactly as in training)
+        belt_start = min(
+            belt.zone_center_x - 0.5 * belt.visual_length(),
+            belt.entry_x() + layout.entry_q - 0.5 * belt.pallet.size[0] - 0.05,
+        )
+        belt_end = belt.end_x()
+        s.belt_visual = s.belt_visual.replace(
+            init_state=s.belt_visual.init_state.replace(
+                pos=(0.5 * (belt_start + belt_end), *s.belt_visual.init_state.pos[1:])
+            ),
+            spawn=s.belt_visual.spawn.replace(size=(belt_end - belt_start, *s.belt_visual.spawn.size[1:])),
+        )
+        table_x, table_len = s.table.init_state.pos[0], s.table.spawn.size[0]
+        table_start, table_end = min(table_x - 0.5 * table_len, belt_start - 0.05), table_x + 0.5 * table_len
+        s.table = s.table.replace(
+            init_state=s.table.init_state.replace(pos=(0.5 * (table_start + table_end), *s.table.init_state.pos[1:])),
+            spawn=s.table.spawn.replace(size=(table_end - table_start, *s.table.spawn.size[1:])),
+        )
+        pallet_geom = belt.pallet.replace(travel_lower=min(belt.pallet.travel_lower, layout.entry_q - 0.04))
         base_z = belt.plate_top_z - belt.pallet.size[2]
         for i, q in enumerate(layout.start_q):
             suffix = "" if i == 0 else f"_{i}"
             pallet = make_pallet_cfg(
-                belt.pallet, f"{{ENV_REGEX_NS}}/Pallet{suffix}", (belt.entry_x(), belt.belt_y, base_z), belt.pallet_damping
+                pallet_geom, f"{{ENV_REGEX_NS}}/Pallet{suffix}", (belt.entry_x(), belt.belt_y, base_z), belt.pallet_damping
             )
             pallet.init_state.joint_pos = {"slider": q}
             bowl_pos = (belt.entry_x() + q, belt.belt_y, belt.plate_top_z + 0.002)

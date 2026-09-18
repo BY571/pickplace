@@ -42,7 +42,6 @@ IMAGE = int(cli.get("image", 128))
 SEED = int(cli.get("seed", 0))
 OUT = Path(cli.get("out") or CHECKPOINT.with_name(f"{CHECKPOINT.stem}_demo{'_home' if HOME_BETWEEN else ''}.mp4"))
 TAIL_SECONDS = 1.0  # video kept running after the last bowl of a finite (total_bowls) run was resolved
-HOME_GAIN = 0.2  # fraction of the remaining TCP pose error commanded per step while homing
 
 from food_robot.system import memory_used_gb  # noqa: E402
 
@@ -56,7 +55,6 @@ import cv2  # noqa: E402
 import imageio.v2 as imageio  # noqa: E402
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
-import isaaclab.utils.math as math_utils  # noqa: E402
 from isaaclab.managers import EventTermCfg, SceneEntityCfg  # noqa: E402
 from torchrl.envs import ExplorationType, set_exploration_type  # noqa: E402
 
@@ -147,6 +145,9 @@ class Line:
         self.food_params.pop("food_cfg")
         self.ground_z = cfg.scene.plane.init_state.pos[2]
         self.pitch = cfg.belt.pallet.size[0] + PALLET_GAP
+        # a bowl becomes the target where a training episode can start it (earliest pallet start and bowl offset)
+        self.min_target_x = (self.belt_params["entry_x"] + self.belt_params["pallet_start_range"][0]
+                             + self.belt_params["bowl_offset_x"][0])
 
         # the policy's observation terms whose input is the (single) bowl or food: rewritten per step
         om = u.observation_manager
@@ -162,6 +163,12 @@ class Line:
         self.settle_count = [0] * k
         self.active: str | None = None
         self.target: int | None = None
+        self.t = 0.0
+        self.events: list[dict] = []
+
+    def log(self, kind: str, bowl: int | None = None) -> None:
+        self.events.append({"t": round(self.t, 2), "event": kind, "bowl": None if bowl is None else self.bowls[bowl],
+                            "food": self.active})
 
     # -- geometry --
     def pallet_q(self, i: int) -> float:
@@ -203,44 +210,40 @@ class Line:
             return  # every item is riding in a bowl; retry next step
         self.active = free[0]
         mdp.reset_food_in_bowl(self.u, self.env_ids, **self.food_params, food_cfg=SceneEntityCfg(self.active))
+        self.log("spawned")
         self.settle_count = [0] * len(self.bowls)
 
     # -- episode-free start --
     def start(self) -> None:
         for i in range(len(self.bowls)):
-            self.seat(i, i * self.cfg.demo_spacing)
+            self.seat(i, self.cfg.demo_entry_q + i * self.cfg.demo_spacing)
         for food in self.foods[1:]:
             self.park(food)
         self.active = "food"  # placed in the tray by the env's own reset
         for i in range(len(self.bowls)):
-            if self.bowl_x(i) <= self.zone_end_x:
+            # a bowl that starts downstream of a training episode's nominal start is not counted
+            if self.pallet_q(i) <= 1e-6:
                 self.status[i] = "open"
                 self.tally.bowl_entered()
 
     # -- observation rewrite --
-    def rewrite_obs(self, td) -> None:
+    def rewrite_obs(self, td) -> bool:
+        """Show the policy the target bowl and the active food; False if there is none (the arm waits at home)."""
         xs = [self.bowl_x(i) for i in range(len(self.bowls))]
-        self.target = pick_target(xs, [s == "open" for s in self.status], self.zone_end_x)
-        # no open bowl in reach: point the policy at the entry, where the next bowl will appear
-        bowl = self.bowls[self.target] if self.target is not None else None
+        self.target = pick_target(xs, [s == "open" for s in self.status], self.min_target_x, self.zone_end_x)
+        if self.target is None or self.active is None:
+            return False
         for group, name, term in self.rewrites:
             params = dict(term.params)
             if group == "belt":
-                if bowl is None:
-                    value = mdp.asset_pos_cell(self.u, SceneEntityCfg(params["asset_cfg"].name)).clone()
-                    value[:, 0] = self.belt_params["entry_x"]
-                    value[:, 1] = self.belt_params["belt_y"]
-                    td.set((group, name), value.to(td.device))
-                    continue
-                params["asset_cfg"] = SceneEntityCfg(bowl)
+                params["asset_cfg"] = SceneEntityCfg(self.bowls[self.target])
             else:
-                if self.active is None:
-                    continue  # keep showing the last item until a spare one is free
                 if "asset_cfg" in params:
                     params["asset_cfg"] = SceneEntityCfg(self.active)
                 elif "food_cfg" in inspect.signature(term.func).parameters:
                     params["food_cfg"] = SceneEntityCfg(self.active)
             td.set((group, name), term.func(self.u, **params).to(td.device).reshape(td.get((group, name)).shape))
+        return True
 
     # -- bookkeeping after a step; returns True on a placement, miss or drop --
     def update(self) -> bool:
@@ -255,14 +258,17 @@ class Line:
                     if self.status[i] == "open":
                         self.status[i] = "filled"
                         self.tally.placed += 1
+                        self.log("placed", i)
                     else:
                         self.tally.misplaced += 1
+                        self.log("misplaced", i)
                     self.food_in[i].append(self.active)
                     self.active, event = None, True
                     break
         if self.active is not None and bool(mdp.food_off_table(u, **self.drop_params,
                                                                  food_cfg=SceneEntityCfg(self.active))[0]):
             self.tally.dropped += 1
+            self.log("dropped")
             self.park(self.active)
             self.active, event = None, True
         for i, bowl in enumerate(self.bowls):
@@ -270,6 +276,7 @@ class Line:
                                                                         bowl_cfg=SceneEntityCfg(bowl))[0]):
                 self.status[i] = "missed"
                 self.tally.missed += 1
+                self.log("missed", i)
                 event = True
         event |= self.carousel()
         if self.active is None:
@@ -291,12 +298,14 @@ class Line:
             if self.status[i] == "open":  # knocked off the pallet and never crossed the zone end
                 self.status[i] = "missed"
                 self.tally.missed += 1
+                self.log("missed", i)
                 event = True
             for food in self.food_in[i]:
                 self.park(food)
             self.food_in[i] = []
             if self.active is not None and self._on_pallet(self.active, q):
                 self.tally.dropped += 1  # rode off the belt end next to the bowl
+                self.log("dropped", i)
                 self.park(self.active)
                 self.active, event = None, True
             if self.exhausted():
@@ -304,7 +313,7 @@ class Line:
                 self.status[i] = "retired"
                 limit = min(limit, q - self.pitch)
             else:
-                self.seat(i, q - recycle_q)
+                self.seat(i, q - recycle_q + self.cfg.demo_entry_q)
                 self.status[i] = "open"
                 self.tally.bowl_entered()
         return event
@@ -320,25 +329,45 @@ class Line:
 
 
 class Homing:
-    """Scripted return of the TCP to its pose after the reset (the arm's default joint pose), gripper unchanged."""
+    """Scripted joint-space motion of the arm to its default joint pose (``home_seconds``), then holding it.
 
-    def __init__(self, u):
-        self.u, self.cfg = u, u.cfg
-        self.home_pos, self.home_quat = self.tcp()
-        self.steps_left = 0
+    While active it replaces the arm action term's ``apply_actions``: the joint position targets follow a straight
+    line from the current joints to the default ones and the arm's own joint PD drives track them. The gripper
+    command is left as it was.
+    """
 
-    def tcp(self):
-        data = self.u.scene["ee_frame"].data
-        return data.target_pos_w.torch[:, 0, :].clone(), data.target_quat_w.torch[:, 0, :].clone()
+    def __init__(self, u, steps: int):
+        self.robot, self.steps = u.scene["robot"], steps
+        self.joint_ids, _ = self.robot.find_joints(u.cfg.arm.arm_joint_names, preserve_order=True)
+        self.default = self.robot.data.default_joint_pos.torch[:, self.joint_ids].clone()
+        self.env_ids = torch.zeros(1, dtype=torch.long, device=u.device)
+        self.term = u.action_manager.get_term("arm_action")
+        self.term_apply = self.term.apply_actions
+        self.arm_dim = self.term.action_dim
+        self.active, self.k, self.start = False, 0, self.default
+
+    def begin(self) -> None:
+        self.active, self.k = True, 0
+        self.start = self.robot.data.joint_pos.torch[:, self.joint_ids].clone()
+        self.term.apply_actions = self._apply
+
+    def end(self) -> None:
+        self.active = False
+        self.term.apply_actions = self.term_apply
+
+    @property
+    def moving(self) -> bool:
+        return self.active and self.k < self.steps
 
     def action(self, gripper: torch.Tensor) -> torch.Tensor:
-        if self.cfg.action_mode == "joint_pos":  # use_default_offset: a zero action holds the default pose
-            arm = torch.zeros(1, len(self.cfg.arm.arm_joint_names), device=self.u.device)
-        else:
-            pos, quat = self.tcp()
-            error = torch.cat([self.home_pos - pos, math_utils.quat_box_minus(self.home_quat, quat)], dim=-1)
-            arm = (HOME_GAIN * error / self.cfg.arm.ik_action_scale).clamp(-1.0, 1.0)
-        return torch.cat([arm, gripper.reshape(1, 1).to(arm.device)], dim=-1)
+        self.k += 1
+        arm = torch.zeros(1, self.arm_dim, device=gripper.device)
+        return torch.cat([arm, gripper.reshape(1, 1)], dim=-1)
+
+    def _apply(self) -> None:
+        alpha = min(1.0, self.k / self.steps)
+        target = self.start + alpha * (self.default - self.start)
+        self.robot.set_joint_position_target_index(target=target, joint_ids=self.joint_ids, env_ids=self.env_ids)
 
 
 # --- run ------------------------------------------------------------------------------------------------------
@@ -354,8 +383,7 @@ actor = tu.load_teacher_actor(CHECKPOINT, env, env.device)
 td = env.reset()
 line = Line(u, TOTAL_BOWLS)
 line.start()
-homing = Homing(u)
-home_steps = max(1, round(HOME_SECONDS / dt))
+homing = Homing(u, max(1, round(HOME_SECONDS / dt)))
 max_steps = int(round(SECONDS / dt))
 caption = f"{CHECKPOINT.parent.parent.name}/{CHECKPOINT.stem} - continuous demo"
 OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -369,10 +397,13 @@ last_length = int(u.episode_length_buf[0])
 with imageio.get_writer(OUT, fps=round(1.0 / dt), codec="libx264", quality=8, macro_block_size=1) as writer, \
         torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
     while n < max_steps:
-        line.rewrite_obs(td)
-        if homing.steps_left > 0 or line.active is None:
+        ready = line.rewrite_obs(td)
+        if homing.active and ready and not (HOME_BETWEEN and homing.moving):
+            homing.end()  # the policy takes over (after the full homing motion when home_between)
+        elif not ready and not homing.active:
+            homing.begin()  # no bowl to serve yet (or no food): return to the default pose and wait
+        if homing.active:
             td["action"] = homing.action(gripper).to(td.device)
-            homing.steps_left = max(0, homing.steps_left - 1)
         else:
             td = actor(td)
         gripper = td["action"][..., -1].clone()
@@ -383,8 +414,9 @@ with imageio.get_writer(OUT, fps=round(1.0 / dt), codec="libx264", quality=8, ma
         robot_resets += int(length <= last_length)
         last_length = length
         placed_before = line.tally.placed
+        line.t = n * dt
         if line.update() and HOME_BETWEEN:
-            homing.steps_left = home_steps
+            homing.begin()
         if line.tally.placed > placed_before and first_place_step is None:
             first_place_step = n
             still_step = n + round(0.5 / dt)
@@ -393,8 +425,8 @@ with imageio.get_writer(OUT, fps=round(1.0 / dt), codec="libx264", quality=8, ma
         lines = [
             f"placed {s['placed']}   missed {s['missed']}   dropped {s['dropped']}",
             f"{s['placements_per_min']:.2f} placements/min   t = {t:5.1f} s",
-            f"bowls {s['bowls_seen']}   {'homing' if homing.steps_left > 0 else 'policy'}"
-            f"   target {'-' if line.target is None else line.bowls[line.target]}",
+            f"bowls {s['bowls_seen']}   " + ("policy" if not homing.active else "homing" if homing.moving else
+                                             "waiting for a bowl"),
         ]
         frame = compose(u.scene["render_cam"].data.output["rgb"][0], td["pixels", "overview_rgb"][0],
                         td["pixels", "wrist_rgb"][0], caption, lines)
@@ -418,8 +450,10 @@ summary = {
     "episode_ends": episode_ends,
     "episode_length_steps": last_length,
     "first_placement_s": None if first_place_step is None else round(first_place_step * dt, 3),
+    "events": line.events,
     "settings": {
-        "bowls": BOWLS, "spacing": round(float(u.cfg.demo_spacing), 4), "recycle_q": round(float(u.cfg.demo_recycle_q), 4),
+        "bowls": BOWLS, "spacing": round(float(u.cfg.demo_spacing), 4),
+        "recycle_q": round(float(u.cfg.demo_recycle_q), 4), "entry_q": round(float(u.cfg.demo_entry_q), 4),
         "food_pool": FOOD_POOL, "total_bowls": TOTAL_BOWLS, "home_between": HOME_BETWEEN,
         "home_seconds": HOME_SECONDS, "belt_speed": float(u.cfg.belt.speed), "image": IMAGE, "seed": SEED,
         "requested_seconds": SECONDS, "step_dt": dt,

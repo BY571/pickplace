@@ -49,6 +49,30 @@ With a v3 checkpoint, try the continuous demo without the scripted return: `demo
     python pipeline/0_state_teacher/render.py all=<run_dir>              # checkpoints without a video
     python pipeline/0_state_teacher/render.py checkpoint=<path.pt> force=true seconds=20
 
+## Continuous demo
+
+A production line instead of episodes, as a video and an evaluation (1 env, cameras on, deterministic policy):
+
+    python pipeline/0_state_teacher/demo.py checkpoint=<path.pt> [seconds=120] [bowls=3] [spacing=<m>] \
+        [total_bowls=null] [home_between=false] [home_seconds=1.0] [out=<mp4>] [image=128]
+
+- Scene (`env.demo`, demo-only; the training scene is unchanged): `bowls` pallets `spacing` apart circulate on the
+  belt — a pallet reaching the belt end is written back upstream (the training `reset_belt`) with its bowl emptied.
+  Default spacing is one reach-zone length (5 s of belt travel per bowl); the belt and table are extended upstream
+  so the queued bowls fit. Arm, supply tray, reach zone, belt end and belt speed are the training ones.
+  Spare food items wait under the table; after a placement or drop the next one goes into the tray (the training
+  food reset). No termination and no time-out: the robot is never reset.
+- The teacher runs unchanged. A bowl becomes the target once it is where a training episode can start one; the
+  target is the most downstream open bowl in reach. Before every policy call the `belt`/`privileged` observations
+  are recomputed by the env's own observation terms for the target bowl and the active food. With no target the
+  arm returns to its default joint pose and waits; `home_between=true` also does that for `home_seconds` after
+  every placement, miss or drop.
+- Counts: `placed` (the success termination's condition), `missed` (a bowl left the zone empty), `dropped` (food
+  off the table), `misplaced` (food settled in a bowl already filled or missed), placements per minute.
+  `total_bowls=N` stops sending bowls after N and ends the video once they are all resolved.
+- Writes `<out>.mp4` (scene camera + the two student views, counters overlaid), `<out>.json` (counters, event log,
+  settings) and `<out>_frame.png`; prints `DEMO {json}` and `DEMO_DONE`.
+
 ## Scaling benchmark
 
     ./scripts/spark.sh --detach python pipeline/0_state_teacher/benchmark.py

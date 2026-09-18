@@ -91,8 +91,8 @@ All metrics finite. Only shifted GAE beat the baseline by 2%, so no combination 
   on the host; our next observations are NaN on done rows), so `compile.cudagraphs` graphs only the PPO update.
   TorchRL marks this path experimental.
 - Shifted GAE: one critic call over T+1 observations instead of two over T. NaN next observations are replaced
-  with the root observation before either path (same approximation as today); after a truncation the true next
-  observation is inserted (budget: one per rollout segment), overflow samples are masked out of the loss.
+  with the root observation before either path (same approximation as today); after a truncation the (sanitised)
+  next observation is inserted (budget: one per rollout segment), overflow samples are masked out of the loss.
 
 ## Comparison with pixel PPO
 

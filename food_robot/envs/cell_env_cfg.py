@@ -203,10 +203,9 @@ class RewardsCfg:
     action_rate = RewTerm(func=base_mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=base_mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
     food_in_bowl = RewTerm(func=mdp.released_in_bowl, weight=1.0, params={})  # params set by _build_food_terms
-    # std 0.2 m (TCP distance to its home position): ~0.76 at home_tolerance (0.05 m), ~0.15 at 0.25 m, fading out
-    # (<0.05) beyond ~0.4 m, roughly where the hand is when it releases over the belt; success (150) rewards the
-    # final approach anyway.
-    return_home = RewTerm(func=mdp.return_home, weight=1.0, params={"std": 0.2})  # rest set by _build_food_terms
+    # std 0.4 m (TCP distance to its home position): ~0.88 at home_tolerance (0.05 m), ~0.24 at 0.4 m -- roughly
+    # where the hand is when it releases over the belt, so the pull home starts right after the release.
+    return_home = RewTerm(func=mdp.return_home, weight=1.0, params={"std": 0.4})  # rest set by _build_food_terms
 
 
 @configclass

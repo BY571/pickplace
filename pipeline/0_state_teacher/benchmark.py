@@ -39,8 +39,10 @@ MEMORY_FRACTION = 0.8
 KILL_FRACTION = 0.85  # kill a measured run above this share of total memory, before the host OOM killer acts
 TIMEOUT_S = 1800
 DEFAULT_RESERVE_GB = 20.0  # background worker (eval + render process); pass reserve_gb= from a measurement
+# Trimmed to fit a ~2 h run (measured: 32,768 envs take 5 min to build): Phase B covers the 2 fastest sizes and
+# rollouts 16/32 (24 dropped); the extra "wrapper" layer of Phase A2 runs at split_envs only.
 FULL = {"num_envs": [4096, 8192, 16384, 32768], "env_steps": 300, "split_envs": 4096,
-        "rollout_steps": [16, 24, 32], "mini_batches": [32768, 131072], "ppo_iterations": 4, "phase_b_top": 3,
+        "rollout_steps": [16, 32], "mini_batches": [32768, 131072], "ppo_iterations": 4, "phase_b_top": 2,
         "phase_c_iterations": 6}
 QUICK = {"num_envs": [64], "env_steps": 50, "split_envs": 64,
          "rollout_steps": [8], "mini_batches": [256], "ppo_iterations": 2, "phase_b_top": 1,
@@ -268,6 +270,8 @@ def phase_a2(grid, table, out, budget):
     best = max(ok, key=lambda r: float(r["env_steps_per_s"]))["num_envs"] if ok else grid["split_envs"]
     for n in sorted({int(grid["split_envs"]), int(best)}):
         for kind in SPLIT_KINDS:
+            if kind == "wrapper" and n != int(grid["split_envs"]):
+                continue
             env_row(table, out, "A" if kind == "env" else "X", n, kind, grid["env_steps"])
 
 

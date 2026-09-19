@@ -19,6 +19,9 @@ DEFAULT_ENV: dict = {
     "frame_stack": 1,
     "privileged_information": False,
     "belt": {},
+    # Reset randomization added to the arm joints' default pose (reset_joints_by_offset; see
+    # FoodCellEnvCfg.robot_reset). Defaults are exactly today's values, so every existing config is unaffected.
+    "robot_reset": {"position_range": [-0.02, 0.02], "velocity_range": [0.0, 0.0]},
     "seed": 0,
     "device": "cuda:0",
     # Legacy one-shot keys: None defers to the reward set (see food_robot.rewards.resolve_reward_weights).
@@ -115,6 +118,7 @@ def build_cell_env_cfg(env_cfg: Mapping):
         success_settle_steps=int(c["success_settle_steps"]),
         success_requires_home=bool(c["success_requires_home"]),
         home_tolerance=float(c["home_tolerance"]),
+        robot_reset=_tuples({**DEFAULT_ENV["robot_reset"], **c["robot_reset"]}),
         ingredient_bowl_pos=tuple(c["ingredient_bowl_pos"]),
         ingredient_bowl_x_range=tuple(c["ingredient_bowl_x_range"]),
         ingredient_bowl_y_range=tuple(c["ingredient_bowl_y_range"]),

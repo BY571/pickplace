@@ -60,7 +60,7 @@ entropy before the lift was ever discovered) and a lower `optim.lr`. Launch: `CO
 A production line instead of episodes, as a video and an evaluation (1 env, cameras on, deterministic policy):
 
     python pipeline/0_state_teacher/demo.py checkpoint=<path.pt> [seconds=120] [bowls=3] [spacing=<m>] \
-        [total_bowls=null] [home_between=false] [home_seconds=1.0] [out=<mp4>] [image=128]
+        [total_bowls=null] [home_between=true] [home_seconds=1.0] [out=<mp4>] [image=128]
 
 - Scene (`env.demo`, demo-only; the training scene is unchanged): `bowls` pallets `spacing` apart circulate on the
   belt — a pallet reaching the belt end is written back upstream (the training `reset_belt`) with its bowl emptied.
@@ -71,8 +71,8 @@ A production line instead of episodes, as a video and an evaluation (1 env, came
 - The teacher runs unchanged. A bowl becomes the target once it is where a training episode can start one; the
   target is the most downstream open bowl in reach. Before every policy call the `belt`/`privileged` observations
   are recomputed by the env's own observation terms for the target bowl and the active food. With no target the
-  arm returns to its default joint pose and waits; `home_between=true` also does that for `home_seconds` after
-  every placement, miss or drop.
+  arm returns to its default joint pose and waits; `home_between` (default true, the demo standard) also does
+  that for `home_seconds` after every placement, miss or drop.
 - Counts: `placed` (the success termination's condition), `missed` (a bowl left the zone empty), `dropped` (food
   off the table), `misplaced` (food settled in a bowl already filled or missed), placements per minute.
   `total_bowls=N` stops sending bowls after N and ends the video once they are all resolved.

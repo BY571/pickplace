@@ -231,6 +231,14 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     """Number of most recent camera frames stacked along the channel axis of each pixel observation.
     1 = single frame (H x W x 3); 3 = H x W x 9, oldest frame first. History resets per env."""
     privileged_information: bool = False
+    robot_reset: dict = {"position_range": (-0.02, 0.02), "velocity_range": (0.0, 0.0)}
+    """Reset randomization added to the arm joints' default pose (``events.reset_robot_joints``,
+    ``base_mdp.reset_joints_by_offset``): ``position_range`` [rad], ``velocity_range`` [rad/s], each biased onto
+    the default and then clamped to the joint's own soft limits. Restricted to the arm joints only (see
+    ``_build_events``, ``arm.arm_joint_names``) -- applying it to the gripper's prismatic finger joints instead
+    would bias ``default_joint_pos`` (open, ~0.04 m) by the same range and clamp to each finger's soft limits
+    (~[0, 0.04] m); at the wide ranges used for start-pose randomization that clamps the fingers fully closed
+    on a large fraction of resets, so the fingers are left out of this event entirely."""
     ingredient_bowl_pos: tuple[float, float, float] = (0.45, -0.10, 0.0)
     ingredient_bowl_x_range: tuple[float, float] = (0.45, 0.45)
     """Reset randomization of the ingredient bowl's x position (cell frame). Degenerate (fixed) by default as
@@ -288,8 +296,10 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     home_tolerance: float = 0.05
     """Radius of "at home" [m]: TCP distance to the TCP position at the default joint pose (``ArmCfg.home_tcp_pos``;
     ``mdp.tcp_home_distance``; end-effector space, since the IK policy cannot steer the redundant elbow).
-    ``reset_robot_joints`` offsets each arm joint by U(-0.02, 0.02) rad, which moves the TCP ~1-2 cm
-    (estimated), so start poses count as home."""
+    ``reset_robot_joints`` offsets each arm joint by U(*robot_reset["position_range"]) rad; at the default
+    (-0.02, 0.02) that moves the TCP ~1-2 cm (estimated), so start poses count as home. A wider ``robot_reset``
+    range (see ``robot_reset``) moves start poses further from home; ``success_requires_home`` configs should
+    keep the default range or widen ``home_tolerance`` to match."""
     demo: bool = False
     """Continuous-demo scene (``pipeline/0_state_teacher/demo.py``), never used for training: ``demo_bowls``
     pallet+bowl pairs spaced ``demo_spacing`` apart on a belt (and table) extended upstream so bowls can queue,
@@ -501,6 +511,8 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     def _build_events(self) -> None:
         arm = self.arm
         self.events.reset_robot_joints.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=arm.arm_joint_names)
+        self.events.reset_robot_joints.params["position_range"] = tuple(self.robot_reset["position_range"])
+        self.events.reset_robot_joints.params["velocity_range"] = tuple(self.robot_reset["velocity_range"])
         static_friction, dynamic_friction = arm.finger_friction
         self.events.gripper_material.params = {
             # fresh SceneEntityCfg (never shared, see the note in _build_food_terms): a body-level resolution

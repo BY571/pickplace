@@ -15,7 +15,7 @@ CONFIG="${CONFIG:-config_v3}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_NAME="teacher_${CONFIG#config_}_$(date -u +%Y%m%dT%H%M%SZ)"
 EXTRA=""; (( $# )) && EXTRA="$(printf ' %q' "$@")"  # extra Hydra overrides, passed on to train.py
-TESTS="tests/unit tests/isaac/test_reward_vector.py tests/isaac/test_return_home.py tests/isaac/test_teacher_smoke.py"
+TESTS="tests/unit tests/isaac/test_reward_vector.py tests/isaac/test_return_home.py tests/isaac/test_teacher_smoke.py tests/isaac/test_robot_reset.py"
 
 # Stale carb semaphores from killed Isaac Sim processes block the next start; clear them only when no Isaac process
 # is running (never under a live run).

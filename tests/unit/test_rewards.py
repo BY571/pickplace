@@ -80,6 +80,13 @@ def test_env_options_home_defaults_and_unknown_keys_raise():
         build_cell_env_cfg({"succes_requires_home": True})
 
 
+def test_default_robot_reset_matches_todays_reset_joints_offset():
+    from food_robot.config import DEFAULT_ENV
+
+    # every existing config keeps today's tight reset (reset_joints_by_offset's params before robot_reset existed)
+    assert DEFAULT_ENV["robot_reset"] == {"position_range": [-0.02, 0.02], "velocity_range": [0.0, 0.0]}
+
+
 def test_unlisted_terms_default_to_zero(tmp_path):
     p = tmp_path / "sparse.yaml"
     p.write_text("success: 1.0\n")

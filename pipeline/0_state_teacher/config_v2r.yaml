@@ -1,0 +1,25 @@
+# Stage 0 teacher v2r: fine-tune the working v2 teacher (98% deterministic success, reward_set simple_v2)
+# with much wider start-pose randomization (env.robot_reset) so the policy is robust to arbitrary start poses,
+# not just the tight training reset pose (default +-0.02 rad) -- the continuous line demo (no resets) fails
+# once a pick starts from any other pose. Everything else is config.yaml. Launch: python pipeline/0_state_teacher/
+# train.py --config-name config_v2r
+defaults:
+  - config
+  - _self_
+
+env:
+  reward_set: simple_v2        # unchanged from the v2 teacher this fine-tunes
+  robot_reset:
+    position_range: [-0.25, 0.25]   # [rad], vs. the training default [-0.02, 0.02]
+    velocity_range: [-0.1, 0.1]     # [rad/s], vs. the training default [0.0, 0.0]
+
+init_checkpoint: /workspace/artifacts/teachers/teacher_simple_v2_600M_20260918_1307/checkpoints/ppo_teacher_390070272.pt
+
+collector:
+  total_frames: 300_000_000    # fine-tuning: shorter horizon than a from-scratch run
+
+optim:
+  lr: 1.0e-4                   # fine-tuning: lower than the from-scratch 3.0e-4
+
+logger:
+  exp_name: state_teacher_v2r

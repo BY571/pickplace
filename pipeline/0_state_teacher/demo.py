@@ -12,7 +12,7 @@ zone empty), ``dropped`` (the active food fell off the table or rode off the bel
 
 Usage:
     python pipeline/0_state_teacher/demo.py checkpoint=<path.pt>
-    options: [seconds=120] [bowls=3] [spacing=<m>] [total_bowls=null] [home_between=false] [home_seconds=1.0]
+    options: [seconds=120] [bowls=3] [spacing=<m>] [total_bowls=null] [home_between=true] [home_seconds=1.0]
              [food_pool=<bowls+2>] [out=<mp4>] [image=128] [seed=0]
 Writes <out>.mp4, <out>.json (summary) and <out>_frame.png; prints ``DEMO {json}`` and ``DEMO_DONE``.
 """
@@ -35,7 +35,7 @@ SECONDS = float(cli.get("seconds", 120.0))
 BOWLS = int(cli.get("bowls", 3))
 SPACING = None if cli.get("spacing") is None else float(cli.spacing)
 TOTAL_BOWLS = None if cli.get("total_bowls") is None else int(cli.total_bowls)
-HOME_BETWEEN = bool(cli.get("home_between", False))
+HOME_BETWEEN = bool(cli.get("home_between", True))
 HOME_SECONDS = float(cli.get("home_seconds", 1.0))
 FOOD_POOL = int(cli.get("food_pool", BOWLS + 2))
 IMAGE = int(cli.get("image", 128))

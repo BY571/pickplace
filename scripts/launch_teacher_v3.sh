@@ -5,12 +5,14 @@
 # incl. config_v3); only if all pass, the training run. The log shows TESTS_PASSED before training starts, or
 # TESTS_FAILED (and the container exits) otherwise.
 #
-# Usage: ./scripts/launch_teacher_v3.sh        (SPARK_HOST overrides the ssh host, as in spark.sh)
+# Usage: ./scripts/launch_teacher_v3.sh [hydra overrides for train.py, e.g. env.num_envs=16384]
+#        (SPARK_HOST overrides the ssh host, as in spark.sh)
 set -euo pipefail
 
 SPARK_HOST="${SPARK_HOST:-spark}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_NAME="teacher_simple_v3_$(date -u +%Y%m%dT%H%M%SZ)"
+EXTRA=""; (( $# )) && EXTRA="$(printf ' %q' "$@")"  # extra Hydra overrides, passed on to train.py
 TESTS="tests/unit tests/isaac/test_reward_vector.py tests/isaac/test_return_home.py tests/isaac/test_teacher_smoke.py"
 
 # Stale carb semaphores from killed Isaac Sim processes block the next start; clear them only when no Isaac process
@@ -20,7 +22,7 @@ ssh "$SPARK_HOST" 'pgrep -f "[k]it/python" >/dev/null || rm -f /dev/shm/carb-* /
 OUT="$("$ROOT/scripts/spark.sh" --detach bash -c "
   { python -m pytest -q $TESTS || { echo TESTS_FAILED; exit 1; }; } \
   && echo TESTS_PASSED \
-  && python pipeline/0_state_teacher/train.py --config-name config_v3 run.name=$RUN_NAME
+  && python pipeline/0_state_teacher/train.py --config-name config_v3 run.name=$RUN_NAME$EXTRA
 ")"
 echo "$OUT"
 NAME="$(sed -n 's/^Started detached container: //p' <<<"$OUT")"

@@ -30,6 +30,9 @@ run:
   dir: null                  # null: $FOOD_ROBOT_ARTIFACTS/teachers/<name>
   name: null                 # null: teachers_<UTC timestamp>
 
+init_checkpoint: null        # path to a teacher .pt: warm-start actor+critic from it (fresh optimizer, frames/
+                              # iteration start at 0); fails loudly if the checkpoint's network config doesn't match
+
 network:
   actor_in_keys: [proprio, belt, privileged]
   critic_in_keys: [proprio, belt, privileged]

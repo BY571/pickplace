@@ -104,6 +104,21 @@ def test_teacher_v3_config_trains(tmp_path):
     assert config["network"]["hidden"] == [512, 256, 128] and config["env"]["action_mode"] == "ee_delta_pose"
 
 
+def test_teacher_warm_starts_from_init_checkpoint(tmp_path):
+    first, tail = _train(tmp_path / "first", "max_iterations=2", "checkpoint.interval_frames=0", "worker.enabled=false")
+    assert "PPO_DONE" in first.stdout, tail
+    init_checkpoint = tmp_path / "first" / "run" / "checkpoints" / "ppo_teacher_final.pt"
+    assert init_checkpoint.exists()
+
+    second, tail2 = _train(
+        tmp_path / "second", "max_iterations=2", "checkpoint.interval_frames=0", "worker.enabled=false",
+        f"init_checkpoint={init_checkpoint}",
+    )
+    assert "PPO_DONE" in second.stdout, tail2
+    manifest = json.loads((tmp_path / "second" / "run" / "manifest.json").read_text())
+    assert manifest["init_checkpoint"] == str(init_checkpoint)
+
+
 def test_teacher_early_stop_saves_final_checkpoint(tmp_path):
     proc, tail = _train(
         tmp_path, "max_iterations=200", "checkpoint.interval_frames=512",

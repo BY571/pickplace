@@ -1,0 +1,19 @@
+# simple_v3b — simple_v3 with 10x smaller smoothness penalties, for fine-tuning an already-placing policy.
+#
+# simple_v3 trained from scratch (pipeline/0_state_teacher/config_v3.yaml) failed: action_rate -0.1 and
+# joint_vel -0.01 collapsed policy entropy before the lift was ever discovered, because a random early policy's
+# per-episode action_rate (~20-28) and joint_vel (~80-140) sums made those penalties dominate the return long
+# before reach_food/grasp paid anything. Here we start from the v2 checkpoint (98% deterministic success,
+# init_checkpoint in config_v3b.yaml), which already places the ball, so exploration only needs to discover
+# return_home on top of a policy that already moves purposefully — action_rate -0.01 and joint_vel -0.001 are
+# small enough not to re-collapse that policy's entropy, while still nudging it toward smoother motion.
+reach_food: 1.0
+grasp: 2.0
+grasp_lift: 5.0
+transport: 10.0
+food_in_bowl: 20.0
+return_home: 10.0
+success: 150.0
+action_rate: -0.01
+joint_vel: -0.001
+bowl_disturbance: -10.0

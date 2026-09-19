@@ -33,6 +33,12 @@ stopping (eval success now means placed AND home); W&B name `state_teacher_v3`. 
 
 With a v3 checkpoint, try the continuous demo without the scripted return: `demo.py ... home_between=false`.
 
+## v3b (fine-tune v2 with the v3 reward)
+
+`config_v3b.yaml` fine-tunes the v2 checkpoint (`init_checkpoint`, fresh optimizer) instead of training v3 from
+scratch, with reward set `simple_v3b` (`simple_v3`'s `action_rate`/`joint_vel` 10x smaller — full size collapsed
+entropy before the lift was ever discovered) and a lower `optim.lr`. Launch: `CONFIG=config_v3b ./scripts/launch_teacher_v3.sh`.
+
 ## Outputs (`$FOOD_ROBOT_ARTIFACTS/teachers/<run>/`)
 
 - `manifest.json` — git commit, resolved config, W&B URL, start/end, stop reason, checkpoint list.

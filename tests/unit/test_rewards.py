@@ -48,6 +48,18 @@ def test_simple_v3_weights():
     assert all(weights[t] == 0.0 for t in R.REWARD_TERMS if t not in simple_v3)
 
 
+def test_simple_v3b_is_simple_v3_with_smaller_smoothness_penalties():
+    simple_v3b = {"reach_food": 1.0, "grasp": 2.0, "grasp_lift": 5.0, "transport": 10.0, "food_in_bowl": 20.0,
+                  "return_home": 10.0, "success": 150.0, "action_rate": -0.01, "joint_vel": -0.001,
+                  "bowl_disturbance": -10.0}
+    weights = R.load_reward_set("simple_v3b")
+    assert set(weights) == set(R.REWARD_TERMS)
+    assert {t: w for t, w in weights.items() if w != 0.0} == simple_v3b
+    assert all(weights[t] == 0.0 for t in R.REWARD_TERMS if t not in simple_v3b)
+    simple_v3 = R.load_reward_set("simple_v3")
+    assert weights["action_rate"] == simple_v3["action_rate"] / 10 and weights["joint_vel"] == simple_v3["joint_vel"] / 10
+
+
 def test_food_in_bowl_then_return_home_are_the_last_dense_terms():
     # appended in this order, so older vectors are a prefix of the dense block
     assert R.DENSE_TERMS[-2:] == ("food_in_bowl", "return_home")

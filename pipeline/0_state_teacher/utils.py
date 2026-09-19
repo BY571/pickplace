@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import shlex
@@ -90,6 +91,20 @@ def make_teacher_models(env, network_cfg, device: torch.device):
     return actor.to(device), critic.to(device)
 
 
+def load_teacher_weights(checkpoint_path, actor, critic, device: torch.device) -> None:
+    """Warm-start freshly built actor/critic from an existing checkpoint (fine-tuning; fresh optimizer).
+
+    Raises (via ``load_state_dict``'s strict mode) if the checkpoint's network shapes don't match this run's,
+    naming the checkpoint so the mismatch is easy to place.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    try:
+        actor.load_state_dict(checkpoint["actor"])
+        critic.load_state_dict(checkpoint["critic"])
+    except RuntimeError as error:
+        raise RuntimeError(f"init_checkpoint {checkpoint_path} does not match this run's network config: {error}") from error
+
+
 def load_teacher_actor(checkpoint_path, env, device: torch.device):
     """Rebuild the actor from a teacher checkpoint (its own network config and weights)."""
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -158,12 +173,45 @@ class CheckpointWorker:
         self.cfg = worker_cfg
         self.proc: subprocess.Popen | None = None
         self._reported: set[tuple[str, str]] = set()
+        self.failed_passes = 0
+        self._pass_checked = True  # nothing to check until a pass has been launched
 
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
+    def check_failure(self) -> None:
+        """Report a finished pass's non-zero exit code loudly, once.
+
+        Without this a worker crash (e.g. "No CUDA GPUs are available" in a subprocess) is silent: no
+        exception, training just never gains an eval/video for any checkpoint again.
+        """
+        if self.proc is None or self.running() or self._pass_checked:
+            return
+        self._pass_checked = True
+        if self.proc.returncode == 0:
+            return
+        self.failed_passes += 1
+        tail = []
+        try:
+            tail = (self.run_dir / "worker.log").read_text().splitlines()[-15:]
+        except OSError:
+            pass
+        print(
+            "WORKER_FAILED "
+            + json.dumps(
+                {
+                    "exit_code": self.proc.returncode,
+                    "failed_passes_total": self.failed_passes,
+                    "unfinished": self.unfinished(),
+                    "log_tail": tail,
+                }
+            ),
+            flush=True,
+        )
+
     def launch(self) -> bool:
         """Start a pass unless one is running; returns whether a pass was started."""
+        self.check_failure()
         if self.running():
             return False
         python = shlex.quote(sys.executable)
@@ -180,6 +228,7 @@ class CheckpointWorker:
         self.proc = subprocess.Popen(
             ["bash", "-c", "; ".join(commands)], stdout=log, stderr=subprocess.STDOUT, start_new_session=True
         )
+        self._pass_checked = False
         log.close()
         return True
 
@@ -212,6 +261,7 @@ class CheckpointWorker:
             return
         try:
             self.proc.wait(timeout=timeout_s)
+            self.check_failure()
             return
         except subprocess.TimeoutExpired:
             pass

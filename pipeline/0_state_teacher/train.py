@@ -71,6 +71,7 @@ def main(cfg: DictConfig):
             "kind": "state_teacher",
             "git_commit": git_commit(),
             "config": OmegaConf.to_container(cfg, resolve=True),
+            "init_checkpoint": cfg.init_checkpoint or None,
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "ended_at": None,
             "stop_reason": None,
@@ -117,6 +118,8 @@ def main(cfg: DictConfig):
 
     try:
         actor, critic = tu.make_teacher_models(env, cfg.network, device)
+        if cfg.init_checkpoint:
+            tu.load_teacher_weights(cfg.init_checkpoint, actor, critic, device)
         collector = Collector(
             env,
             actor,
@@ -243,6 +246,8 @@ def main(cfg: DictConfig):
         reached = False
         if worker is None:
             return reached
+        worker.check_failure()
+        metrics["worker/failed_passes"] = worker.failed_passes
         for kind, manifest in worker.new_results():
             if kind == "eval":
                 metrics.update({f"eval/{k}": v for k, v in manifest["eval"].items()})

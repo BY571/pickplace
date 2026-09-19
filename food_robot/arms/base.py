@@ -26,6 +26,9 @@ class ArmCfg:
     ee_body_name: str = MISSING
     tcp_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Tool center point offset from the end-effector body frame."""
+    home_tcp_pos: tuple[float, float, float] = MISSING
+    """TCP position (env-local, [m]) at the robot's default joint pose: "home" for ``success_requires_home`` and
+    the ``return_home`` reward. Measured in the simulator with ``scripts/measure_home_tcp.py``."""
     gripper_open: float = MISSING
     gripper_closed: float = MISSING
     wrist_cam_offset: CameraCfg.OffsetCfg = MISSING

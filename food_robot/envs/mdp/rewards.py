@@ -110,7 +110,7 @@ def return_home(
     robot_cfg: SceneEntityCfg,
     open_pos: float,
     closed_pos: float,
-    arm_cfg: SceneEntityCfg,
+    home_pos: tuple[float, float, float],
     food_cfg: SceneEntityCfg = SceneEntityCfg("food"),
     bowl_cfg: SceneEntityCfg = SceneEntityCfg("bowl"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
@@ -121,7 +121,7 @@ def return_home(
     placed = released_in_bowl_mask(
         env, inner_radius, base_thickness, rim_height, item_radius, robot_cfg, open_pos, closed_pos, food_cfg, bowl_cfg
     )
-    return placed.float() * (1.0 - torch.tanh(tcp_home_distance(env, arm_cfg, ee_frame_cfg) / std))
+    return placed.float() * (1.0 - torch.tanh(tcp_home_distance(env, home_pos, ee_frame_cfg) / std))
 
 
 def termination_indicator(env: ManagerBasedRLEnv, term_names: list[str]) -> torch.Tensor:

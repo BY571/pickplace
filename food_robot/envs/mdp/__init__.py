@@ -24,7 +24,6 @@ from food_robot.envs.mdp.rewards import (
     transport_to_bowl,
 )
 from food_robot.envs.mdp.terminations import (
-    arm_home_distance,
     food_in_bowl,
     food_off_table,
     never,

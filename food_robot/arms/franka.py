@@ -49,6 +49,9 @@ FRANKA_CFG = ArmCfg(
     base_link_name="panda_link0",
     ee_body_name="panda_hand",
     tcp_offset=(0.0, 0.0, 0.1034),
+    # TCP at the default joint pose, env-local [m]: measured 2026-09-19 on the Spark with scripts/measure_home_tcp.py
+    # (ik_robot, default joints held by joint-position targets; joint error 0).
+    home_tcp_pos=(0.4633, 0.0, 0.3855),
     gripper_open=0.04,
     gripper_closed=0.0,
     # Mounted on the back of the hand, off the finger axis (fingers slide along the hand's y axis), and tilted

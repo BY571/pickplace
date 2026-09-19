@@ -286,9 +286,10 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     """Success = food settled in the bowl AND the TCP within ``home_tolerance`` of its home position (see
     ``mdp.food_in_bowl``). False: success as before (settled in the bowl only)."""
     home_tolerance: float = 0.05
-    """Radius of "at home" [m]: TCP distance to the TCP position at the default joint pose (``mdp.tcp_home_distance``;
-    end-effector space, since the IK policy cannot steer the redundant elbow). ``reset_robot_joints`` offsets each arm
-    joint by U(-0.02, 0.02) rad, which moves the TCP ~1-2 cm (estimated), so start poses count as home."""
+    """Radius of "at home" [m]: TCP distance to the TCP position at the default joint pose (``ArmCfg.home_tcp_pos``;
+    ``mdp.tcp_home_distance``; end-effector space, since the IK policy cannot steer the redundant elbow).
+    ``reset_robot_joints`` offsets each arm joint by U(-0.02, 0.02) rad, which moves the TCP ~1-2 cm
+    (estimated), so start poses count as home."""
     demo: bool = False
     """Continuous-demo scene (``pipeline/0_state_teacher/demo.py``), never used for training: ``demo_bowls``
     pallet+bowl pairs spaced ``demo_spacing`` apart on a belt (and table) extended upstream so bowls can queue,
@@ -574,13 +575,9 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
         # the success termination and the food_in_bowl reward share one "in the bowl" geometry
         self.terminations.success.params = {**bowl_params(), "settle_steps": self.success_settle_steps}
         if self.success_requires_home:
-            self.terminations.success.params.update(
-                home_tolerance=self.home_tolerance, arm_cfg=SceneEntityCfg("robot", joint_names=arm.arm_joint_names)
-            )
+            self.terminations.success.params.update(home_tolerance=self.home_tolerance, home_pos=arm.home_tcp_pos)
         self.rewards.food_in_bowl.params = bowl_params()
-        self.rewards.return_home.params.update(
-            **bowl_params(), arm_cfg=SceneEntityCfg("robot", joint_names=arm.arm_joint_names)
-        )
+        self.rewards.return_home.params.update(**bowl_params(), home_pos=arm.home_tcp_pos)
         hover = bowl.base_thickness + bowl.wall_height + self.food.item_radius + 0.03
         self.rewards.grasp.params.update(grip_params())
         self.rewards.grasp_lift.params.update(grip_params())
@@ -667,5 +664,5 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
                 term.func, term.params = mdp.never, {}
         # the demo counts a placement when the food settles (``settled_in_bowl_mask``); "and the arm is home" is a
         # training-episode rule (success_requires_home), so its params are not part of the placement check
-        for key in ("home_tolerance", "arm_cfg"):
+        for key in ("home_tolerance", "home_pos"):
             self.demo_termination_params["success"].pop(key, None)

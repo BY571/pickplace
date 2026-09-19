@@ -15,7 +15,7 @@ TESTS="tests/unit tests/isaac/test_reward_vector.py tests/isaac/test_return_home
 
 # Stale carb semaphores from killed Isaac Sim processes block the next start; clear them only when no Isaac process
 # is running (never under a live run).
-ssh "$SPARK_HOST" 'pgrep -f kit/python >/dev/null || rm -f /dev/shm/carb-* /dev/shm/sem.carb*'
+ssh "$SPARK_HOST" 'pgrep -f "[k]it/python" >/dev/null || rm -f /dev/shm/carb-* /dev/shm/sem.carb*'
 
 OUT="$("$ROOT/scripts/spark.sh" --detach bash -c "
   { python -m pytest -q $TESTS || { echo TESTS_FAILED; exit 1; }; } \

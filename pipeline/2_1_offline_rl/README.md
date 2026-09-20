@@ -84,12 +84,38 @@ W&B project `food_robot`, group `offline_rl`.
 
 Teacher (privileged state, cameras off, same evaluation protocol): **0.984** success.
 
-| Algorithm | Run | Gradient steps | Best online success | Final online success | W&B |
-|---|---|---|---|---|---|
-| BC | | | | | |
-| IQL | | | | | |
-| CQL | *planned* | | | | |
-| TD3+BC | *planned* | | | | |
+![Online success rate vs gradient steps](../../docs/experiments/pipeline_stage2_1/success_rate.png)
+
+| Algorithm | Run | Steps | Best | Final | Mean of last 5 evals | Wall clock | W&B |
+|---|---|---|---|---|---|---|---|
+| BC | `students/bc_expert_medium_v1` | 150 k | 0.758 @ 80 k | 0.500 | **0.548** | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
+| IQL | `students/iql_expert_medium_v1` | 150 k | 0.727 @ 80 k | 0.617 | **0.614** | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
+| CQL | *planned* | | | | | | |
+| TD3+BC | *planned* | | | | | | |
+
+Success rate per evaluation (128 episodes each, so one episode is 0.8 points and the binomial standard error
+around 0.6 is about 0.043):
+
+| Gradient steps (k) | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 | 130 | 140 | 150 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| BC | .05 | .44 | .45 | .57 | .43 | .58 | .65 | **.76** | .47 | .63 | .66 | .57 | .60 | .41 | .50 |
+| IQL | .16 | .34 | .30 | .63 | .45 | .44 | .59 | **.73** | .45 | .59 | .66 | .63 | .55 | .62 | .62 |
+
+**Reading it.** Both curves climb fast to ~0.45 by 30-40 k and then oscillate in a 0.4-0.76 band with no
+further trend — flat from roughly 60 k on, so the 150 k budget is already past the point of return. The
+swings are much larger than evaluation noise (±0.04), so they are real policy changes from step to step, not
+sampling error: with a state-independent scale that has collapsed (BC's mean scale falls from 0.98 to ~0.12
+by 10 k steps), a small drift in the mean action changes the grasp outcome on a large share of episodes.
+The two algorithms are within noise of each other on the best checkpoint (0.76 vs 0.73), but IQL is the more
+stable of the two late in training (last-five mean 0.61 vs 0.55, and BC's last three evaluations are its
+worst since 30 k). A camera-only student reaches roughly **three quarters of the teacher's 0.984 at its best
+checkpoint and about 60% on average**, which is the cost of removing proprioception and privileged state.
+
+**What to try next**, in the order the evidence suggests: pick checkpoints by evaluation rather than by step
+(the best checkpoint beats the final one by 15-25 points in both runs); average several evaluations per point
+or use more evaluation envs so the selection is not chasing noise; add the `noisy_v3c` tier for state
+coverage; and give the actor a learned, state-dependent scale so it can stay stochastic where the data is
+ambiguous. CQL and TD3+BC come next and inherit this protocol unchanged.
 
 ## Adding an algorithm
 

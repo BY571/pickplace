@@ -13,6 +13,12 @@ license: cc-by-4.0
 
 # Pick-and-place on a moving conveyor — offline RL dataset (images + state)
 
+![One episode of the recorded task](assets/episode.gif)
+
+*One episode as recorded: the arm picks the ball from the supply tray, places it into a bowl riding the
+belt and returns home, which ends the episode. Top: a scene camera for illustration only, never part of
+the data. Bottom: the two camera views that are stored (shown here at 128 px; the dataset stores 84 px).*
+
 Offline-RL dataset of a simulated Franka arm picking food from a supply tray and placing it into bowls
 riding a moving conveyor belt, recorded in Isaac Lab 3 by rolling out a privileged-state teacher policy with
 cameras enabled. Three quality tiers (`expert`, `medium`, `noisy`) of the same task, generated from
@@ -23,8 +29,10 @@ demonstrations and characteristic failure modes to learn from.
 the hand is back within 5 cm of its start pose. Episodes also end on a failure outcome (bowl leaves its
 tracked zone, bowl falls off the belt or tips, food is dropped off the table) or a time-out.
 
-The source code that generated this dataset lives in a **private** GitHub repository, so this card is
-written to stand on its own.
+**Code:** the environment, the teacher training and the collection script live at
+[github.com/BY571/food-robot](https://github.com/BY571/food-robot) (`pipeline/0_state_teacher` and
+`pipeline/1_collect_data`). The repository is private at the time of writing and will be opened later, so
+this card is written to stand on its own.
 
 ## How the data was generated
 
@@ -156,6 +164,11 @@ length and the `success` flag itself are all still correct on these rows. **Trea
 authoritative outcome flag**; do not assume the outcome flags are mutually exclusive.
 
 ## Schema
+
+![Frames as stored in the dataset](assets/dataset_frames.png)
+
+*Six frames sampled across the `expert` tier, both cameras, exactly as stored (84x84x3 uint8, upscaled
+here with nearest-neighbour).*
 
 Every row of `storage/` has the following keys.
 

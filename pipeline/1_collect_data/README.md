@@ -35,9 +35,9 @@ Cost: 2 cameras x 84 x 84 x 3 uint8 = 42 KB/frame, i.e. ~42 GB per million frame
 | `action`, `loc`, `scale` | float32 `(7,)` | executed action and the teacher's distribution parameters |
 | `step_count` | int64 `(1,)` | step index inside the episode |
 | `("collector", "traj_ids")` | int64 | trajectory id (unique per episode across the shard) |
-| `("next", "reward")`, `("next", "reward_terms")` | float32 `(1,)`, `(13,)` | scalar reward and the **unweighted** term vector (`food_robot.rewards.REWARD_TERMS`) |
+| `("next", "reward")`, `("next", "reward_terms")` | float32 `(1,)`, `(13,)` | scalar reward and the **unweighted** term vector (`pickplace.rewards.REWARD_TERMS`) |
 | `("next", "terminated")`, `("next", "truncated")`, `("next", "done")` | bool `(1,)` | |
-| `("next", "outcome", <term>)` | bool `(1,)` | how the episode ended (`food_robot.metrics.OUTCOME_TERMS`) |
+| `("next", "outcome", <term>)` | bool `(1,)` | how the episode ended (`pickplace.metrics.OUTCOME_TERMS`) |
 
 Rows are **time-major**: row `i` and row `i + manifest["successor_stride"]` (= `num_envs`) are consecutive steps
 of the same sub-env. So the successor observation of row `i` is row `i + stride`, valid when
@@ -52,7 +52,7 @@ outcome rates and mean per-term episodic sums over every episode that finished d
 ## Load
 
 ```python
-from food_robot.datasets import load_shard, shard_manifest
+from pickplace.datasets import load_shard, shard_manifest
 
 buffer = load_shard("/workspace/artifacts/shards/expert_v3c", batch_size=256)  # TensorDictReplayBuffer
 batch = buffer.sample()                     # uint8 images, nothing copied into RAM until sampled

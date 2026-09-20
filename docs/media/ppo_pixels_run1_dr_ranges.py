@@ -10,7 +10,7 @@ from matplotlib.patches import Circle, Patch, Rectangle
 
 sns.set()
 
-# --- geometry from the env defaults (food_robot/envs/cell_env_cfg.py, belt.py, usd_builders.py) ---
+# --- geometry from the env defaults (pickplace/envs/cell_env_cfg.py, belt.py, usd_builders.py) ---
 BOWL_R = 0.07 + 0.006  # inner radius + wall thickness
 TABLE = (-0.30, 1.20, -0.55, 0.55)
 BELT_Y, BELT_HALF = 0.30, 0.15

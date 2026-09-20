@@ -5,7 +5,7 @@ reach zone. The arm must pick a food item from the ingredient bowl and place it 
 the bowl leaves the zone — without knocking the bowl over or off the belt.
 
 - Simulator: Isaac Lab 3 (PhysX), manager-based env, gym id `FoodRobot-Cell-v0`
-- TorchRL: `food_robot.torchrl_env.make_env(cfg)` → `TransformedEnv(IsaacLabWrapper(...))`
+- TorchRL: `pickplace.torchrl_env.make_env(cfg)` → `TransformedEnv(IsaacLabWrapper(...))`
 - Control rate: 50 Hz (`sim.dt = 0.01`, `decimation = 2`)
 
 ## Layout (cell frame = env origin, meters)
@@ -87,7 +87,7 @@ Belt speed is intentionally not observed: the line runs at a fixed speed.
 
 `image_float` returns float32 (4 bytes/channel), 4x the native uint8 camera buffer (1 byte/channel),
 because Isaac Lab's `ManagerBasedRLEnv` always declares observation spaces as float32 (see the term's
-docstring in `food_robot/envs/mdp/observations.py`). TorchRL additionally stores one copy of every
+docstring in `pickplace/envs/mdp/observations.py`). TorchRL additionally stores one copy of every
 observation at the root of a transition and one at `"next"`, so each camera term costs roughly:
 
 ```
@@ -152,21 +152,21 @@ bowl until `time_out` could reach ≈ 232 — but those are absolute ceilings, n
 behaviour. What matters is the *marginal* choice: a policy that stalls above the bowl instead of placing gains at
 most ≈ 23/s × the ≈ 3.2 s left before `time_out` ≈ 74, while forfeiting the 150 success bonus, so placing always
 wins; and deliberately dropping the food (−150 by default, −10 in run 3) is never rational, because doing
-nothing instead costs only the tiny regularization terms. `food_robot/envs/cell_env_cfg.py` documents the
+nothing instead costs only the tiny regularization terms. `pickplace/envs/cell_env_cfg.py` documents the
 full anti-exploit argument next to the three constants, and asks you to re-check it whenever `belt.speed`,
 `belt.speed_noise`, `belt.place_window` or the dense reward weights change.
 
 ### Reward-term vector and reward sets
 
 `make_env` exposes every reward term, unweighted, as `("next", "reward_terms")` (shape `(N, 12)`) in
-`food_robot.rewards.REWARD_TERMS` order: the dense terms `reach_food`, `grasp`, `grasp_lift`, `transport`,
+`pickplace.rewards.REWARD_TERMS` order: the dense terms `reach_food`, `grasp`, `grasp_lift`, `transport`,
 `transport_fine`, `bowl_disturbance`, `action_rate`, `joint_vel`, `food_in_bowl` (component = term value × dt, recovered from
 Isaac Lab's reward manager) followed by the event terms `success`, `bowl_failure`, `food_dropped` (0/1, only
 non-zero on the done row of an episode that ended that way, taken from `("next", "outcome", ...)`; `success`
 is the Isaac Lab term `place_success`).
 
 The training reward `("next", "reward")` is TorchRL's `LineariseRewards` over that vector: a weighted sum with
-one weight per term. Weights come from a named reward set, `food_robot/reward_sets/<name>.yaml`, selected by
+one weight per term. Weights come from a named reward set, `pickplace/reward_sets/<name>.yaml`, selected by
 `env.reward_set` (default `staged_v1`, the table above) and overridden per term with
 `env.reward_weights: {term: weight}` (e.g. the CLI override `+env.reward_weights.food_dropped=-10.0` — the
 `+` is required because the `sota-implementations/ppo` configs do not define the key, and Hydra's struct mode
@@ -174,7 +174,7 @@ rejects adding an absent key without it). Dense weights are reward per second th
 are the one-shot bonus (positive) or penalty (negative). The legacy keys still work and resolve to the same
 reward as before: `rewards` (dense terms only) and `success_bonus` / `bowl_failure_penalty` /
 `food_drop_penalty` (when not null; penalties become negative weights), with `reward_weights` applied last
-(`food_robot.torchrl_env.reward_weights(env_cfg)` returns the final weights). Isaac Lab itself keeps a
+(`pickplace.torchrl_env.reward_weights(env_cfg)` returns the final weights). Isaac Lab itself keeps a
 non-zero weight on every dense term (a zero-weight term would be skipped and vanish from the vector), so its
 own logged `Episode_Reward/*` stats follow those forced weights, not the training ones: under a reward set
 that zeroes a dense term, the `Episode_Reward/*` series for it (e.g. the `reach_food` health signal
@@ -326,16 +326,16 @@ task 14 does both together:
 | `ik_action_scale` / `joint_action_scale` | `0.5` / `0.5` | action scaling |
 
 Adding an arm: create an `ArmCfg` with the arm's articulation configs, joint/body names, TCP offset and
-wrist camera mount, and register it in `food_robot/config.py`. Observation and action specs follow
+wrist camera mount, and register it in `pickplace/config.py`. Observation and action specs follow
 automatically.
 
 The Franka's own asset path needs one workaround: `isaaclab_assets` (pinned at v3.0.0-beta2.patch1) still
 points at `.../FrankaEmika/panda_instanceable.usd`, but the live Nucleus asset pack moved that file under a
-`Legacy/` subpath. `food_robot/arms/franka.py` rewrites the path to
+`Legacy/` subpath. `pickplace/arms/franka.py` rewrites the path to
 `.../FrankaEmika/Legacy/panda_instanceable.usd` (and raises loudly if neither path shape matches, so a
 future Nucleus or `isaaclab_assets` change is caught instead of silently ignored).
 
-### Hydra / plain-mapping config (`food_robot.config.build_cell_env_cfg`)
+### Hydra / plain-mapping config (`pickplace.config.build_cell_env_cfg`)
 
 `build_cell_env_cfg` (used by `make_env` and every `sota-implementations/*` Hydra config's `env:` section)
 merges a plain mapping over `DEFAULT_ENV` and builds the `FoodCellEnvCfg` above. In addition to the
@@ -345,7 +345,7 @@ constructor kwargs it forwards directly (`num_envs`, `arm`, `food`, `action_mode
 
 | Key | Meaning |
 |---|---|
-| `reward_set` | Name of a reward set in `food_robot/reward_sets/` (or a path to a YAML file); default `staged_v1`. |
+| `reward_set` | Name of a reward set in `pickplace/reward_sets/` (or a path to a YAML file); default `staged_v1`. |
 | `reward_weights` | `{term: weight}` overrides over the reward set; unknown term names raise `KeyError`. |
 | `rewards` | Legacy: `{dense_term: weight}` overrides. Unknown or non-dense names (e.g. `place_success`) raise `KeyError`. |
 | `success_bonus` / `bowl_failure_penalty` / `food_drop_penalty` | Legacy: when not null, set the `success` weight to `+value` and the `bowl_failure` / `food_dropped` weights to `-value`. |
@@ -357,16 +357,16 @@ Unknown top-level keys raise `ValueError` listing the allowed set (`DEFAULT_ENV`
 ## TorchRL usage
 
 ```python
-from food_robot.app import launch_app
+from pickplace.app import launch_app
 app = launch_app(headless=True, enable_cameras=False)   # before importing torch
 
-from food_robot.torchrl_env import make_env
+from pickplace.torchrl_env import make_env
 env = make_env({"task": "FoodRobot-Cell-v0", "num_envs": 16, "cameras": False, "privileged_information": True})
 td = env.rollout(10)
 print(td["next", "proprio", "ee_pos"].shape)   # (16, 10, 3)
 ```
 
-Route observations to model parts with `food_robot.keys.expand_in_keys(env.observation_spec, ["proprio", "belt"])`.
+Route observations to model parts with `pickplace.keys.expand_in_keys(env.observation_spec, ["proprio", "belt"])`.
 Inspect the spec tree: `python scripts/check_env.py env.cameras=false env.privileged_information=true`.
 
 ### Episode outcome
@@ -374,7 +374,7 @@ Inspect the spec tree: `python scripts/check_env.py env.cameras=false env.privil
 `make_env` adds an `EpisodeOutcome` transform. On a done row, `("next", "outcome", <term>)` is True for the
 termination term(s) that ended the episode (`success`, `bowl_exited_zone`, `bowl_off_belt`, `bowl_tipped`,
 `food_off_table`, `time_out`); it is False everywhere else. The success rate of a batch is therefore
-`outcome.success[done].float().mean()` (see `food_robot.metrics.outcome_rates`), exact per finished episode,
+`outcome.success[done].float().mean()` (see `pickplace.metrics.outcome_rates`), exact per finished episode,
 unlike `termination_stats`, which only reflects each env's most recent episode.
 
 ## Training

@@ -25,7 +25,7 @@ the default joint pose; end-effector space because the IK policy cannot steer th
 learns to finish the job instead of wandering after the release; reward set
 `simple_v3` — `return_home` (new dense term, `1 - tanh(d / 0.2 m)` while the food lies released in the bowl),
 success 150, and small motion penalties (`action_rate` -0.1, `joint_vel` -0.01, `bowl_disturbance` -10) against
-jerky actions and bumped bowls (reasoning in `food_robot/reward_sets/simple_v3.yaml`); `total_frames` 600 M with early
+jerky actions and bumped bowls (reasoning in `pickplace/reward_sets/simple_v3.yaml`); `total_frames` 600 M with early
 stopping (eval success now means placed AND home); W&B name `state_teacher_v3`. The v2 defaults are unchanged.
 
     ./scripts/launch_teacher_v3.sh     # one detached container: v3 tests, then (only if they pass) training

@@ -20,8 +20,8 @@ Artifacts live outside the repository under `$FOOD_ROBOT_ARTIFACTS` (default `~/
 ## Rewards
 
 The environment exposes every reward term, unweighted, as `("next", "reward_terms")` in the order of
-`food_robot.rewards.REWARD_TERMS`; TorchRL's `LineariseRewards` turns it into the scalar `reward` with the weights
-of a reward set (`food_robot/reward_sets/<name>.yaml`). Select one with `env.reward_set=<name>` and override
+`pickplace.rewards.REWARD_TERMS`; TorchRL's `LineariseRewards` turns it into the scalar `reward` with the weights
+of a reward set (`pickplace/reward_sets/<name>.yaml`). Select one with `env.reward_set=<name>` and override
 single weights with `+env.reward_weights.<term>=<value>`. Because datasets store the vector, later stages can
 relabel the same data under any reward set. The reward is simulator-only training scaffolding: only the inputs
 of the deployed student (cameras and robot state) must exist on a real robot.

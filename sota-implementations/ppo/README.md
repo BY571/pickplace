@@ -108,7 +108,7 @@ Logged metrics (W&B, and one `METRICS {json}` stdout line per iteration):
   `PxgAABBManager.cpp` "PhysX error: ... increase PxGpuDynamicsMemoryConfig::totalAggregatePairsCapacity"
   errors (requesting up to ~16,883 against the then-default capacity of 16,384 = `16*1024`). Fixed by
   raising `PhysxCfg.gpu_total_aggregate_pairs_capacity` to `32*1024` in
-  `food_robot/envs/cell_env_cfg.py`; two subsequent runs at the same `num_envs=4096` produced zero PhysX
+  `pickplace/envs/cell_env_cfg.py`; two subsequent runs at the same `num_envs=4096` produced zero PhysX
   errors. A later, longer teacher run at 4096 envs (2026-09-18) requested ~33.2k and logged ~25k errors,
   and 64k overflowed as well (the logged request tracks the capacity), so the capacity is now PhysX's default
   `2*1024*1024` and scales linearly above 4096 envs (`scale_physx_buffers`).

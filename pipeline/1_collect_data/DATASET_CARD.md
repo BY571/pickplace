@@ -30,7 +30,7 @@ the hand is back within 5 cm of its start pose. Episodes also end on a failure o
 tracked zone, bowl falls off the belt or tips, food is dropped off the table) or a time-out.
 
 **Code:** the environment, the teacher training and the collection script live at
-[github.com/BY571/food-robot](https://github.com/BY571/food-robot) (`pipeline/0_state_teacher` and
+[github.com/BY571/pickplace](https://github.com/BY571/pickplace) (`pipeline/0_state_teacher` and
 `pipeline/1_collect_data`). The repository is private at the time of writing and will be opened later, so
 this card is written to stand on its own.
 
@@ -119,7 +119,7 @@ because the policy commands end-effector poses and the Franka's redundant elbow 
 joint positions ±0.25 rad, joint velocities ±0.1 rad/s.
 
 **Relabelling the reward:** `("next", "reward_terms")` (see [Schema](#schema)) is the **unweighted** vector
-in `food_robot.rewards.REWARD_TERMS` order — the same 13 terms as the table above plus the two zero-weighted
+in `pickplace.rewards.REWARD_TERMS` order — the same 13 terms as the table above plus the two zero-weighted
 event terms, in the order `[reach_food, grasp, grasp_lift, transport, transport_fine, bowl_disturbance,
 action_rate, joint_vel, food_in_bowl, return_home, success, bowl_failure, food_dropped]`. `("next",
 "reward")` is just `simple_v3b`'s weighted sum of that vector, so you can substitute your own weights
@@ -205,7 +205,7 @@ Every row of `storage/` has the following keys.
 
 `("next", "reward_terms")` is ordered `[reach_food, grasp, grasp_lift, transport, transport_fine,
 bowl_disturbance, action_rate, joint_vel, food_in_bowl, return_home, success, bowl_failure, food_dropped]`
-(`food_robot.rewards.REWARD_TERMS`: 10 dense shaping terms followed by 3 one-shot event terms). Dense terms
+(`pickplace.rewards.REWARD_TERMS`: 10 dense shaping terms followed by 3 one-shot event terms). Dense terms
 are `value x dt`; event terms are 0/1 on the step the episode ends that way. The scalar `("next", "reward")`
 is the weighted sum of this vector under the collecting run's reward set (`simple_v3b`, recorded per-tier
 in `manifest.json["reward_weights"]`); the unweighted vector lets you relabel the reward with different
@@ -214,11 +214,11 @@ means and a relabelling example.
 
 ## How to load
 
-With the (private) source repo, `food_robot.datasets.load_shard` opens a shard as a TorchRL replay buffer,
+With the (private) source repo, `pickplace.datasets.load_shard` opens a shard as a TorchRL replay buffer,
 reading nothing into RAM until you sample:
 
 ```python
-from food_robot.datasets import load_shard, shard_manifest
+from pickplace.datasets import load_shard, shard_manifest
 
 buffer = load_shard("expert", batch_size=256)  # TensorDictReplayBuffer over a memmap
 batch = buffer.sample()                        # uint8 images, float32 everything else

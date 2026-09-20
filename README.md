@@ -1,6 +1,10 @@
-# food-robot
+# pickplace
 
 Isaac Lab environment of a robot arm placing food into bowls moving on a conveyor belt, runnable with TorchRL.
+
+*Formerly named `food_robot`/`food-robot`. The Spark checkout (`~/food-robot`), the artifacts dir
+(`~/food-robot-artifacts`), the Docker image (`food-robot:latest`) and the `FOOD_ROBOT_*` environment
+variables still use the old name and are unaffected by this rename.*
 
 <p align="center">
   <img src="docs/media/training_setup.gif" alt="Food cell: Franka arm, ingredient bowl with food, and a bowl riding the conveyor belt" width="480">

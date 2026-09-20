@@ -1,0 +1,37 @@
+# Stage 0 teacher v3c: the combination the continuous demo needs — the v3 reward (return_home, success = ball
+# settled in the bowl AND the TCP back home) ON TOP OF randomized start poses, warm-started from v2r_long.
+# Why both: with the v2 reward the episode ends at the placement, so the policy has no trained behaviour
+# afterwards and freezes in an extrapolated pose once the line keeps running (3/26 bowls without scripted
+# homing, whatever the start randomization). v3b had the return-home reward but not the start randomization and
+# drifted into unseen poses after one or two cycles (2/26). v2r_long has the randomization but not the
+# return-home reward (3/26, yet 20/20 with scripted homing).
+# Randomization stays at +-0.25 rad: +-0.75 (v2r_wide) reached 96-98% eval success but lost placement precision
+# in the demo (16/20 bowls, 3 drops, vs 20/20 and 0 drops at +-0.25) for the same training budget.
+# Penalties are simple_v3b's gentle ones (action_rate -0.01, joint_vel -0.001): simple_v3's 10x larger values
+# collapsed exploration in a from-scratch run.
+# Launch: python pipeline/0_state_teacher/train.py --config-name config_v3c
+defaults:
+  - config
+  - _self_
+
+env:
+  reward_set: simple_v3b
+  success_requires_home: true
+  robot_reset:
+    position_range: [-0.25, 0.25]   # [rad], as in v2r_long
+    velocity_range: [-0.1, 0.1]     # [rad/s]
+
+init_checkpoint: /workspace/artifacts/teachers/teacher_v2r_long_20260920T070700Z/checkpoints/ppo_teacher_final.pt
+
+collector:
+  total_frames: 300_000_000
+
+optim:
+  lr: 1.0e-4
+
+early_stop:
+  success_rate: 0.95           # success now also requires the hand back home, so a slightly lower bar than
+  consecutive_evals: 4         # v2r_long's 0.97
+
+logger:
+  exp_name: state_teacher_v3c

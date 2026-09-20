@@ -1,0 +1,31 @@
+# Stage 0 teacher v2r_long: same fine-tune as config_v2r.yaml (wide start-pose randomization,
+# env.robot_reset +-0.25 rad / +-0.1 rad/s) but trained longer. config_v2r's early_stop.success_rate: 0.85
+# stopped it at 45.6 M frames (W&B f6asb4g1) as soon as eval success passed 0.85: 95% eval success, but worse
+# in the continuous demo than the un-randomized v2 teacher (17/20 bowls placed with 4 drops, vs 20/20 with 1
+# drop) -- the fine-tune hadn't recovered v2's placement precision yet. Raise the bar to 0.97 (4 evals in a
+# row) so it keeps training toward that, or exhausts the full 300 M-frame budget. Everything else is
+# config_v2r.yaml / config.yaml. Launch: python pipeline/0_state_teacher/train.py --config-name config_v2r_long
+defaults:
+  - config
+  - _self_
+
+env:
+  reward_set: simple_v2        # unchanged from the v2 teacher this fine-tunes
+  robot_reset:
+    position_range: [-0.25, 0.25]   # [rad], vs. the training default [-0.02, 0.02]
+    velocity_range: [-0.1, 0.1]     # [rad/s], vs. the training default [0.0, 0.0]
+
+init_checkpoint: /workspace/artifacts/teachers/teacher_simple_v2_600M_20260918_1307/checkpoints/ppo_teacher_390070272.pt
+
+collector:
+  total_frames: 300_000_000    # fine-tuning: shorter horizon than a from-scratch run
+
+optim:
+  lr: 1.0e-4                   # fine-tuning: lower than the from-scratch 3.0e-4
+
+early_stop:
+  success_rate: 0.97           # config_v2r's 0.85 stopped the fine-tune at 45.6 M frames before it recovered
+  consecutive_evals: 4         # v2's precision (95% eval success but 4 drops/20 in the continuous demo)
+
+logger:
+  exp_name: state_teacher_v2r_long

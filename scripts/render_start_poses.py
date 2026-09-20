@@ -38,7 +38,7 @@ tiles = int(cli.get("tiles", 12))
 cols = int(cli.get("cols", 4))
 settle_steps = int(cli.get("settle_steps", 5))
 poses = int(cli.get("poses", 12))
-ghost_alpha = float(cli.get("ghost_alpha", 0.25))
+ghost_alpha = float(cli.get("ghost_alpha", 0.3))
 diff_threshold = int(cli.get("diff_threshold", 12))
 
 env_overrides = OmegaConf.to_container(cli.env, resolve=True) if "env" in cli else {}
@@ -88,14 +88,21 @@ def label(img: np.ndarray, text: str) -> np.ndarray:
 
 env = make_env(env_cfg)
 
+# Early-termination watch (overlay mode only): did any post-reset settle step already trip a failure
+# termination? That's the real signal for "randomization too wide", not just how the render looks.
+WATCH_TERMS = ["bowl_exited_zone", "bowl_off_belt", "bowl_tipped", "food_off_table"]
+
 if mode == "overlay":
+    u = env.base_env._env.unwrapped
     frames = []
-    for _ in range(poses):
+    for pose_i in range(poses):
         td = env.reset()
-        for _ in range(settle_steps):
+        for step_i in range(settle_steps):
             td.set("action", torch.zeros(env.action_spec.shape, device=env.device))
             td = step_mdp(env.step(td))
-        u = env.base_env._env.unwrapped
+            for name in WATCH_TERMS:
+                if bool(u.termination_manager.get_term(name)[0]):
+                    print(f"EARLY_TERMINATION pose={pose_i} step={step_i} term={name}", flush=True)
         frames.append(to_uint8(u.scene["render_cam"].data.output["rgb"][0]))
 
     stack = np.stack(frames).astype(np.float32)  # (poses, H, W, 3)

@@ -77,3 +77,27 @@ The tiers fail in different ways, which is the point of mixing them: the medium 
 (31% `bowl_exited_zone`, mean episode length 164 steps vs the expert's 114), while the noisy expert mostly drops
 food (9.5% `food_off_table`, 5% missed). σ = 0.2 came from 80 k-frame probes of the expert checkpoint:
 σ 0.10 → 0.956, σ 0.15 → 0.916, σ 0.20 → 0.835 success. Peak host memory was 31 GB (512 envs, 84 px).
+
+## Verification
+
+`scripts/verify_shard.py` checks structure (keys/dtypes/shapes), value sanity (NaN/inf, action bounds,
+image content), episode structure (trajectory-id runs, done/outcome exclusivity, the successor-stride
+invariant), recomputed statistics vs the manifest, checkpoint provenance, and cross-tier plausibility:
+
+    ./scripts/spark.sh python scripts/verify_shard.py \
+        /workspace/artifacts/shards/expert_v3c /workspace/artifacts/shards/medium_v3c /workspace/artifacts/shards/noisy_v3c
+
+| Tier | Episodes | Success | Return | Length | Zero frames (sample) | Checkpoint sha256 | Result |
+|---|---|---|---|---|---|---|---|
+| expert_v3c | 8515 | 0.9834 | 182.46 | 114.2 | 0/200 | matches, file exists | 3/8515 done rows with 2 outcome flags set |
+| medium_v3c | 5818 | 0.6741 | 163.52 | 164.3 | 0/200 | matches, file exists | clean |
+| noisy_v3c | 6052 | 0.8409 | 177.56 | 158.3 | 0/200 | matches, file exists | 6/6052 done rows with 2 outcome flags set |
+
+All structure/sanity/episode/statistics/provenance checks passed on all three shards, and the tiers behave
+as their names claim (expert > noisy > medium success; medium mostly misses the bowl, noisy mostly drops
+food). The only defect: `expert_v3c` and `noisy_v3c` each have a handful (<0.1% of episodes) of done rows
+where two outcome flags are true at once (mostly `success` + `bowl_exited_zone`, all with
+`terminated=True`) instead of exactly one — an upstream env outcome-classification edge case, not a
+`collect.py`/`load_shard` bug. `success` is still correct on those rows; stage 2 should treat `success` as
+authoritative rather than assuming outcome-flag exclusivity. Full report:
+`.superpowers/sdd/pipeline-stage0/verify-shards-report.md`.

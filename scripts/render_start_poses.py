@@ -3,15 +3,18 @@
 Two modes:
   mode=grid (default): one env per tile, reset once, settle a few steps with zero-motion actions, then
                         capture each env's scene camera and tile them into one PNG.
-  mode=overlay: a single env, reset+settle N times (default 8), capturing the same scene camera each time;
-                the frames are combined into one "ghosting" image (pixel-wise median background, each pose
-                alpha-blended on top) so several arm poses are visible at once in one table scene.
+  mode=overlay: a single env, reset+settle N times (default 12), capturing the same (tight, table-framed)
+                scene camera each time; a classic multi-exposure: the N frames are combined pixel-wise
+                (combine=max by default -- the arm is brighter than the table/floor, so max keeps it visible
+                at every sampled pose; mean/min are also available but read as a much fainter haze), then the
+                last pose is pasted back in at full opacity (via a simple diff mask) as a crisp reference pose.
 
 Usage:
     python scripts/render_start_poses.py [out=outputs/render/start_poses.png] [tiles=12] [cols=4]
                                          [env.robot_reset.position_range=[-0.25,0.25]]
                                          [env.robot_reset.velocity_range=[-0.1,0.1]]
-    python scripts/render_start_poses.py mode=overlay [out=outputs/render/start_poses_overlay.png] [poses=8] \\
+    python scripts/render_start_poses.py mode=overlay [out=outputs/render/start_poses_overlay.png] \\
+                                         [poses=12] [combine=mean|min|max] \\
                                          [env.robot_reset.position_range=[-0.25,0.25]] \\
                                          [env.robot_reset.velocity_range=[-0.1,0.1]]
 
@@ -33,24 +36,31 @@ out_path = str(cli.get("out", "outputs/render/start_poses.png"))
 tiles = int(cli.get("tiles", 12))
 cols = int(cli.get("cols", 4))
 settle_steps = int(cli.get("settle_steps", 5))
-poses = int(cli.get("poses", 8))
+poses = int(cli.get("poses", 12))
+# mean (classic multi-exposure) leaves the arm as only a faint haze against the table; max keeps the arm
+# (brighter than the table/floor) fully visible at every sampled pose, which reads far more legibly as
+# "several start poses at once" -- verified by eye, see scripts/render_start_poses.py usage docstring.
+combine = str(cli.get("combine", "max"))
 diff_threshold = int(cli.get("diff_threshold", 12))
-alpha = float(cli.get("alpha", 0.55))
 
 env_overrides = OmegaConf.to_container(cli.env, resolve=True) if "env" in cli else {}
 robot_reset = {"position_range": [-0.25, 0.25], "velocity_range": [-0.1, 0.1]}
 robot_reset.update(env_overrides.pop("robot_reset", {}))
 
 TILE_HW = (270, 480)
-OVERLAY_HW = (480, 854)
+OVERLAY_HW = (720, 1280)
 RENDER_HW = OVERLAY_HW if mode == "overlay" else TILE_HW
 num_envs = 1 if mode == "overlay" else tiles
+# Tighter, table-framed view for overlay mode (num_envs=1, so no neighbouring envs to keep out of frame);
+# grid mode keeps the wider DEFAULT_ENV view so every tile still shows the belt run-out.
+camera_overrides = {"render_cam_eye": [1.5, -1.15, 1.25], "render_cam_target": [0.35, 0.0, 0.4]} if mode == "overlay" else {}
 env_cfg = {
     "num_envs": num_envs,
     "cameras": True,
     "render_camera": True,
     "render_image_size": list(RENDER_HW),
     "robot_reset": robot_reset,
+    **camera_overrides,
     **env_overrides,
 }
 
@@ -91,23 +101,30 @@ if mode == "overlay":
         frames.append(to_uint8(u.scene["render_cam"].data.output["rgb"][0]))
 
     stack = np.stack(frames).astype(np.float32)  # (poses, H, W, 3)
-    median = np.median(stack, axis=0)  # (H, W, 3) static background (table/belt/bowls)
+    if combine == "min":
+        base = stack.min(axis=0)  # arm bright on darker scene -> min keeps the (darker) static scene sharp
+    elif combine == "max":
+        base = stack.max(axis=0)  # -> max keeps the (brighter) arm visible in every pose
+    else:
+        base = stack.mean(axis=0)  # classic multi-exposure: every pose shows through equally translucent
 
-    canvas = median.copy()
-    kernel = np.ones((5, 5), np.uint8)
-    for i, frame in enumerate(stack):
-        diff = np.abs(frame - median).max(axis=-1)  # (H, W)
-        mask = (diff > diff_threshold).astype(np.uint8) * 255
-        mask = cv2.dilate(mask, kernel, iterations=1)
-        mask = cv2.GaussianBlur(mask, (7, 7), 0)
-        mask_f = (mask.astype(np.float32) / 255.0)[..., None]
-        a = 1.0 if i == len(stack) - 1 else alpha  # draw the last pose crisp
-        canvas = canvas * (1 - mask_f * a) + frame * (mask_f * a)
+    # Paste the last pose back in at full opacity as a crisp reference, via a simple diff mask. The mask is
+    # computed against the per-pixel MEDIAN (a clean background estimate, since the arm occupies any single
+    # pixel in a minority of the poses) rather than against `base`, which is itself already ghost-smeared and
+    # would otherwise flag the arm's entire swept envelope (erasing the other poses' ghosts, not just pose 12).
+    last = stack[-1]
+    median_bg = np.median(stack, axis=0)
+    diff = np.abs(last - median_bg).max(axis=-1)  # (H, W)
+    mask = (diff > diff_threshold).astype(np.uint8) * 255
+    mask = cv2.dilate(mask, np.ones((5, 5), np.uint8), iterations=1)
+    mask = cv2.GaussianBlur(mask, (7, 7), 0)
+    mask_f = (mask.astype(np.float32) / 255.0)[..., None]
+    canvas = base * (1 - mask_f) + last * mask_f
 
     grid = canvas.clip(0, 255).astype(np.uint8)
     caption = (
         f"robot_reset position_range={robot_reset['position_range']} "
-        f"velocity_range={robot_reset['velocity_range']} poses={poses}"
+        f"velocity_range={robot_reset['velocity_range']} poses={poses} combine={combine}"
     )
 else:
     td = env.reset()

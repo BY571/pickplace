@@ -153,12 +153,12 @@ actor = tu.load_teacher_actor(checkpoint, env, device)
 
 policy = actor
 if noise_sigma > 0.0:
-    low, high = env.action_spec.low, env.action_spec.high
     # Explicit noise instead of torchrl's AdditiveGaussianModule: that module only perturbs the action under
     # ExplorationType.RANDOM, which would also make the teacher sample from its distribution instead of
-    # taking the mean action this collection is built on.
+    # taking the mean action this collection is built on. Bounds are the teacher's TanhNormal support
+    # [-1, 1] (the env's own action spec is unbounded).
     def add_noise(action: torch.Tensor) -> torch.Tensor:
-        return (action + noise_sigma * torch.randn_like(action)).clamp(low, high)
+        return (action + noise_sigma * torch.randn_like(action)).clamp(-1.0, 1.0)
 
     policy = TensorDictSequential(actor, TensorDictModule(add_noise, in_keys=["action"], out_keys=["action"]))
 

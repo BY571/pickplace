@@ -5,6 +5,6 @@ import gymnasium as gym
 gym.register(
     id="FoodRobot-Cell-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
-    kwargs={"env_cfg_entry_point": "food_robot.envs.cell_env_cfg:FoodCellEnvCfg"},
+    kwargs={"env_cfg_entry_point": "pickplace.envs.cell_env_cfg:FoodCellEnvCfg"},
     disable_env_checker=True,
 )

@@ -1,6 +1,6 @@
 import json
 
-from food_robot import artifacts as A
+from pickplace import artifacts as A
 
 
 def test_root_from_env(monkeypatch, tmp_path):

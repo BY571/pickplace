@@ -2,7 +2,7 @@
 
 Drives the arm to the food, closes the gripper, lifts 0.25 m, and reports whether the food came along, at
 the env's default food friction range. This is what justifies the ``finger_friction`` /
-``RigidFoodCfg`` friction choices (``food_robot/arms/base.py``, ``food_robot/food/rigid.py``) instead of
+``RigidFoodCfg`` friction choices (``pickplace/arms/base.py``, ``pickplace/food/rigid.py``) instead of
 guesswork: with ``friction_sweep``, the whole probe reruns once per food friction value, each in its own
 subprocess (one Isaac Sim per process, as ``scripts/benchmark_pixels.py`` does), via a degenerate
 ``static_friction_range == dynamic_friction_range == (f, f)``, producing a measured slip-vs-friction curve.
@@ -121,8 +121,8 @@ def run_grasp_probe(cfg, capture_transport: bool = False) -> dict:
     import gymnasium as gym
     import torch
 
-    import food_robot.envs  # noqa: F401
-    from food_robot.envs.mdp.rewards import grasped, transport_to_bowl
+    import pickplace.envs  # noqa: F401
+    from pickplace.envs.mdp.rewards import grasped, transport_to_bowl
 
     if cfg.action_mode != "ee_delta_pose":
         raise ValueError("run_grasp_probe needs env.action_mode='ee_delta_pose'.")
@@ -252,11 +252,11 @@ def run_grasp_probe(cfg, capture_transport: bool = False) -> dict:
 
 
 def _run_worker(num_envs: int, food_friction: float | None) -> None:
-    from food_robot.app import launch_app
+    from pickplace.app import launch_app
 
     launch_app(headless=True)
 
-    from food_robot.config import build_cell_env_cfg
+    from pickplace.config import build_cell_env_cfg
 
     food_params = {}
     if food_friction is not None:

@@ -8,7 +8,7 @@ import torch
 
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg, TerminationTermCfg
 
-from food_robot.envs.mdp.observations import grasped_mask
+from pickplace.envs.mdp.observations import grasped_mask
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv

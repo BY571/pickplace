@@ -26,11 +26,11 @@ until_done = bool(cli.get("until_done", True))
 image = int(cli.get("image", 128))
 force = bool(cli.get("force", False))
 
-from food_robot.system import memory_used_gb  # noqa: E402
+from pickplace.system import memory_used_gb  # noqa: E402
 
 baseline_gb = memory_used_gb()
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=True)
 
@@ -40,9 +40,9 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from torchrl.envs import ExplorationType, set_exploration_type  # noqa: E402
 
-from food_robot.artifacts import read_json, update_json  # noqa: E402
-from food_robot.metrics import OUTCOME_TERMS  # noqa: E402
-from food_robot.torchrl_env import make_env  # noqa: E402
+from pickplace.artifacts import read_json, update_json  # noqa: E402
+from pickplace.metrics import OUTCOME_TERMS  # noqa: E402
+from pickplace.torchrl_env import make_env  # noqa: E402
 
 # Loaded by file path: with cameras enabled, Isaac Sim's bundled cv2/utils shadows `import utils`.
 _spec = importlib.util.spec_from_file_location("teacher_utils", os.path.join(HERE, "utils.py"))

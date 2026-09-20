@@ -7,16 +7,16 @@ from _common import finish
 
 SPARSE = "--sparse" in sys.argv
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True)
 
 import torch  # noqa: E402
 from torchrl.envs.utils import check_env_specs  # noqa: E402
 
-from food_robot.config import build_cell_env_cfg  # noqa: E402
-from food_robot.rewards import DENSE_TERMS, EVENT_TERMS, REWARD_TERMS  # noqa: E402
-from food_robot.torchrl_env import make_env, reward_weights  # noqa: E402
+from pickplace.config import build_cell_env_cfg  # noqa: E402
+from pickplace.rewards import DENSE_TERMS, EVENT_TERMS, REWARD_TERMS  # noqa: E402
+from pickplace.torchrl_env import make_env, reward_weights  # noqa: E402
 
 N, STEPS = 16, 600
 # Short belt cycle so episodes end often within the rollout (as in the torchrl_episodes scenario).

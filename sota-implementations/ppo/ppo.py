@@ -28,7 +28,7 @@ def _load_local_utils():
 
 @hydra.main(config_path="", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
-    from food_robot.app import launch_app
+    from pickplace.app import launch_app
 
     launch_app(headless=cfg.app.headless, enable_cameras=cfg.env.cameras, device=cfg.env.device)
 
@@ -41,7 +41,7 @@ def main(cfg: DictConfig):
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
 
-    from food_robot.torchrl_env import make_env, termination_stats
+    from pickplace.torchrl_env import make_env, termination_stats
 
     _utils = _load_local_utils()
     make_ppo_models, save_checkpoint = _utils.make_ppo_models, _utils.save_checkpoint
@@ -130,7 +130,7 @@ def main(cfg: DictConfig):
                 data = adv_module(data)
             # ClipPPOLoss only reads root observations, action, log-prob, advantage and value_target;
             # drop the "next" sub-tensordict (~4x larger for float32 camera frames, see
-            # food_robot/envs/mdp/observations.py::image_float and docs/environment.md) before it goes
+            # pickplace/envs/mdp/observations.py::image_float and docs/environment.md) before it goes
             # into the buffer.
             buffer.extend(data.exclude("next").reshape(-1))
             for batch in buffer:

@@ -6,7 +6,7 @@ episode-length plausibility, done/outcome exclusivity, the successor-stride inva
 recomputed statistics against its manifest, and the source checkpoint's continued existence/hash. With
 more than one shard path, also prints a cross-tier comparison of success rates and failure mixes.
 
-Simulator-free: loads the shard's memmap via ``food_robot.datasets.load_shard`` (no Isaac Sim, no GPU).
+Simulator-free: loads the shard's memmap via ``pickplace.datasets.load_shard`` (no Isaac Sim, no GPU).
 Reads pixels only for a spread sample of rows -- everything else is read in full (it's tiny per row).
 
 Usage:
@@ -24,10 +24,10 @@ from pathlib import Path
 
 import torch
 
-from food_robot.artifacts import sha256_file
-from food_robot.datasets import load_shard, shard_manifest
-from food_robot.metrics import OUTCOME_TERMS
-from food_robot.rewards import REWARD_TERMS
+from pickplace.artifacts import sha256_file
+from pickplace.datasets import load_shard, shard_manifest
+from pickplace.metrics import OUTCOME_TERMS
+from pickplace.rewards import REWARD_TERMS
 
 CAMERAS = ("overview_rgb", "wrist_rgb")
 ACTION_BOUND = 1.0  # the teacher's TanhNormal support; collect.py clips executed actions (incl. noise) to this

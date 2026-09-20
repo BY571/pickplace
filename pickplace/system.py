@@ -1,7 +1,7 @@
 """System-resource helpers. Stdlib-only (no torch): callable before ``launch_app()``.
 
-Every simulator process must call ``food_robot.app.launch_app(...)`` before importing torch, so
-this module must never import torch or tensordict (unlike ``food_robot.training``), letting
+Every simulator process must call ``pickplace.app.launch_app(...)`` before importing torch, so
+this module must never import torch or tensordict (unlike ``pickplace.training``), letting
 pipeline scripts read the memory baseline before launching the app.
 """
 

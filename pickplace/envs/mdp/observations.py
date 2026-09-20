@@ -1,4 +1,4 @@
-# food_robot/envs/mdp/observations.py
+# pickplace/envs/mdp/observations.py
 """Observation terms. Positions are expressed in the cell frame (env origin); quaternions are xyzw."""
 
 from __future__ import annotations

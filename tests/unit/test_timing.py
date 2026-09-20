@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from food_robot.timing import (
+from pickplace.timing import (
     BeltZone,
     belt_zone,
     look_at_quat_xyzw,

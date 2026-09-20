@@ -1,6 +1,6 @@
 import torch
 
-from food_robot.metrics import OUTCOME_TERMS, outcome_rates
+from pickplace.metrics import OUTCOME_TERMS, outcome_rates
 
 
 def test_outcome_terms_cover_all_terminations():

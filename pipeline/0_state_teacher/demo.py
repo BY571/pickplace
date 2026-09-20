@@ -43,11 +43,11 @@ SEED = int(cli.get("seed", 0))
 OUT = Path(cli.get("out") or CHECKPOINT.with_name(f"{CHECKPOINT.stem}_demo{'_home' if HOME_BETWEEN else ''}.mp4"))
 TAIL_SECONDS = 1.0  # video kept running after the last bowl of a finite (total_bowls) run was resolved
 
-from food_robot.system import memory_used_gb  # noqa: E402
+from pickplace.system import memory_used_gb  # noqa: E402
 
 baseline_gb = memory_used_gb()
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=True)
 
@@ -58,9 +58,9 @@ import torch  # noqa: E402
 from isaaclab.managers import EventTermCfg, SceneEntityCfg  # noqa: E402
 from torchrl.envs import ExplorationType, set_exploration_type  # noqa: E402
 
-from food_robot.carousel import PALLET_GAP, DemoTally, park_position, pick_target  # noqa: E402
-from food_robot.envs import mdp  # noqa: E402
-from food_robot.torchrl_env import make_env  # noqa: E402
+from pickplace.carousel import PALLET_GAP, DemoTally, park_position, pick_target  # noqa: E402
+from pickplace.envs import mdp  # noqa: E402
+from pickplace.torchrl_env import make_env  # noqa: E402
 
 # Loaded by file path: with cameras enabled, Isaac Sim's bundled cv2/utils shadows `import utils`.
 _spec = importlib.util.spec_from_file_location("teacher_utils", os.path.join(HERE, "utils.py"))

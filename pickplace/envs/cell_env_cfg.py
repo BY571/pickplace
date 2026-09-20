@@ -28,14 +28,14 @@ from isaaclab_physx.assets import DeformableObjectCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab_physx.sim.schemas import CollisionPropertiesCfg
 
-from food_robot.arms import FRANKA_CFG, ArmCfg
-from food_robot.assets.scene_assets import make_bowl_cfg, make_pallet_cfg
-from food_robot.assets.usd_builders import BowlGeometry
-from food_robot.belt import BELT_COLOR, BeltCfg
-from food_robot.carousel import carousel_layout, park_position
-from food_robot.envs import mdp
-from food_robot.food import FoodSourceCfg, RigidFoodCfg
-from food_robot.timing import (
+from pickplace.arms import FRANKA_CFG, ArmCfg
+from pickplace.assets.scene_assets import make_bowl_cfg, make_pallet_cfg
+from pickplace.assets.usd_builders import BowlGeometry
+from pickplace.belt import BELT_COLOR, BeltCfg
+from pickplace.carousel import carousel_layout, park_position
+from pickplace.envs import mdp
+from pickplace.food import FoodSourceCfg, RigidFoodCfg
+from pickplace.timing import (
     look_at_quat_xyzw,
     validate_bowl_on_pallet,
     validate_observation_flags,

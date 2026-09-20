@@ -55,11 +55,11 @@ print(f'torch={torch.__version__} cuda={torch.cuda.is_available()} torchrl={torc
 RUN "${ISAACLAB_PATH}/isaaclab.sh" -p -m pip install \
       "wandb>=0.19" "moviepy>=2" "seaborn>=0.13" "matplotlib>=3.8"
 
-# Copy just pyproject.toml + food_robot/ (not the whole repo) so a runtime
+# Copy just pyproject.toml + pickplace/ (not the whole repo) so a runtime
 # bind-mount of the repo root at /workspace/food-robot takes effect without
 # invalidating this layer on every code edit.
 COPY pyproject.toml /workspace/food-robot/pyproject.toml
-COPY food_robot/ /workspace/food-robot/food_robot/
+COPY pickplace/ /workspace/food-robot/pickplace/
 WORKDIR /workspace/food-robot
 RUN "${ISAACLAB_PATH}/isaaclab.sh" -p -m pip install --no-deps -e . && \
     chown -R isaaclab:isaaclab /workspace/food-robot

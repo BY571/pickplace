@@ -13,8 +13,8 @@ def launch_app(headless: bool = True, enable_cameras: bool = False, device: str 
     """
     if "torch" in sys.modules:
         raise RuntimeError(
-            "torch was imported before launching Isaac Sim. Call food_robot.app.launch_app() at the very top "
-            "of the entry point, before importing torch, torchrl, tensordict or food_robot.envs."
+            "torch was imported before launching Isaac Sim. Call pickplace.app.launch_app() at the very top "
+            "of the entry point, before importing torch, torchrl, tensordict or pickplace.envs."
         )
     from isaaclab.app import AppLauncher
 

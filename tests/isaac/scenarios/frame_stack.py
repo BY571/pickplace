@@ -2,15 +2,15 @@
 
 from _common import finish
 
-from food_robot.app import launch_app
+from pickplace.app import launch_app
 
 app = launch_app(headless=True, enable_cameras=True)
 
 import gymnasium as gym  # noqa: E402
 import torch  # noqa: E402
 
-import food_robot.envs  # noqa: E402,F401
-from food_robot.envs.cell_env_cfg import FoodCellEnvCfg  # noqa: E402
+import pickplace.envs  # noqa: E402,F401
+from pickplace.envs.cell_env_cfg import FoodCellEnvCfg  # noqa: E402
 
 
 def single_frame_term() -> str:

@@ -16,16 +16,16 @@ The robot is the training articulation (``ArmCfg.ik_robot``: gravity-free, stiff
 
 from _common import finish
 
-from food_robot.app import launch_app
+from pickplace.app import launch_app
 
 app = launch_app(headless=True)
 
 import gymnasium as gym  # noqa: E402
 import torch  # noqa: E402
 
-import food_robot.envs  # noqa: E402,F401
-from food_robot.config import build_cell_env_cfg  # noqa: E402
-from food_robot.envs import mdp  # noqa: E402
+import pickplace.envs  # noqa: E402,F401
+from pickplace.config import build_cell_env_cfg  # noqa: E402
+from pickplace.envs import mdp  # noqa: E402
 
 N = 2
 FAR = 0.5  # [rad] offset of joint 1 in phase (a): moves the TCP well outside home_tolerance

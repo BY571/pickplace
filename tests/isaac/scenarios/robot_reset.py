@@ -4,11 +4,11 @@ cases -- construction only, no gym.make/stepping needed."""
 
 from _common import finish
 
-from food_robot.app import launch_app
+from pickplace.app import launch_app
 
 app = launch_app(headless=True)
 
-from food_robot.config import build_cell_env_cfg  # noqa: E402
+from pickplace.config import build_cell_env_cfg  # noqa: E402
 
 BASE_ENV = {"cameras": False, "privileged_information": True}
 OVERRIDE_ENV = {

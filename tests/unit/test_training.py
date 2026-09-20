@@ -2,9 +2,9 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from food_robot.metrics import OUTCOME_TERMS
-from food_robot.rewards import REWARD_TERMS
-from food_robot.training import SuccessStreak, episode_metrics, first_episode_metrics
+from pickplace.metrics import OUTCOME_TERMS
+from pickplace.rewards import REWARD_TERMS
+from pickplace.training import SuccessStreak, episode_metrics, first_episode_metrics
 
 K = len(REWARD_TERMS)
 

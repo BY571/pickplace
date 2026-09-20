@@ -16,8 +16,8 @@ from torch import nn
 from torchrl.envs import ExplorationType
 from torchrl.modules import MLP, ProbabilisticActor, TanhNormal, ValueOperator
 
-from food_robot.keys import expand_in_keys
-from food_robot.metrics import OUTCOME_TERMS, outcome_rates
+from pickplace.keys import expand_in_keys
+from pickplace.metrics import OUTCOME_TERMS, outcome_rates
 
 
 def _is_image(shape: tuple[int, ...]) -> bool:

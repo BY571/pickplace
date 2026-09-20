@@ -7,16 +7,16 @@ from _common import finish
 MODE, CAMERAS, PRIVILEGED = sys.argv[1], bool(int(sys.argv[2])), bool(int(sys.argv[3]))
 FRAME_STACK = int(sys.argv[4]) if len(sys.argv) > 4 else 1
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=CAMERAS)
 
 import torch  # noqa: E402
 from torchrl.envs.utils import check_env_specs, step_mdp  # noqa: E402
 
-from food_robot.config import build_cell_env_cfg  # noqa: E402
-from food_robot.keys import expand_in_keys  # noqa: E402
-from food_robot.torchrl_env import make_env, termination_stats  # noqa: E402
+from pickplace.config import build_cell_env_cfg  # noqa: E402
+from pickplace.keys import expand_in_keys  # noqa: E402
+from pickplace.torchrl_env import make_env, termination_stats  # noqa: E402
 
 ENV = {"num_envs": 4, "cameras": CAMERAS, "privileged_information": PRIVILEGED, "frame_stack": FRAME_STACK}
 

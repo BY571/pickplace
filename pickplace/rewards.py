@@ -57,7 +57,7 @@ def _complete(weights: Mapping, source: str) -> dict[str, float]:
 
 
 def load_reward_set(name_or_path: str) -> dict[str, float]:
-    """Load a reward set by name (``food_robot/reward_sets/<name>.yaml``) or by file path."""
+    """Load a reward set by name (``pickplace/reward_sets/<name>.yaml``) or by file path."""
     path = Path(name_or_path)
     if path.suffix not in (".yaml", ".yml"):
         path = REWARD_SETS_DIR / f"{name_or_path}.yaml"

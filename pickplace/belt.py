@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from isaaclab.utils.configclass import configclass
 
-from food_robot.assets.usd_builders import BowlGeometry, PalletGeometry
-from food_robot.timing import BeltZone, belt_zone
+from pickplace.assets.usd_builders import BowlGeometry, PalletGeometry
+from pickplace.timing import BeltZone, belt_zone
 
 
 BELT_COLOR: tuple[float, float, float] = (0.08, 0.08, 0.08)

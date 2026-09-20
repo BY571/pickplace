@@ -1,6 +1,6 @@
 import pytest
 
-from food_robot.carousel import (
+from pickplace.carousel import (
     DemoTally,
     carousel_layout,
     park_position,

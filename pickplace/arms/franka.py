@@ -3,7 +3,7 @@
 from isaaclab.sensors import CameraCfg
 from isaaclab_assets.robots.franka import FRANKA_PANDA_CFG, FRANKA_PANDA_HIGH_PD_CFG
 
-from food_robot.arms.base import ArmCfg
+from pickplace.arms.base import ArmCfg
 
 
 _OLD_USD_SUFFIX = "FrankaEmika/panda_instanceable.usd"
@@ -32,7 +32,7 @@ def _with_legacy_usd(cfg):
     if _OLD_USD_SUFFIX not in path:
         raise RuntimeError(
             f"Expected the Franka USD path to contain {_OLD_USD_SUFFIX!r} (or already-patched "
-            f"{_NEW_USD_SUFFIX!r}) so food_robot/arms/franka.py can work around Nucleus content "
+            f"{_NEW_USD_SUFFIX!r}) so pickplace/arms/franka.py can work around Nucleus content "
             f"drift, but got: {path!r}. isaaclab_assets or the Nucleus layout changed again; update "
             f"_OLD_USD_SUFFIX/_NEW_USD_SUFFIX in this file."
         )

@@ -1,7 +1,7 @@
 import pytest
 from torchrl.data import Composite, Unbounded
 
-from food_robot.keys import expand_in_keys
+from pickplace.keys import expand_in_keys
 
 
 @pytest.fixture

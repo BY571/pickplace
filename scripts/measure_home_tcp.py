@@ -10,15 +10,15 @@ Usage: python scripts/measure_home_tcp.py [arm=franka]
 import os
 import sys
 
-from food_robot.app import launch_app
+from pickplace.app import launch_app
 
 app = launch_app(headless=True)
 
 import gymnasium as gym  # noqa: E402
 import torch  # noqa: E402
 
-import food_robot.envs  # noqa: E402,F401
-from food_robot.config import build_cell_env_cfg  # noqa: E402
+import pickplace.envs  # noqa: E402,F401
+from pickplace.config import build_cell_env_cfg  # noqa: E402
 
 args = dict(a.split("=", 1) for a in sys.argv[1:])
 cfg = build_cell_env_cfg(

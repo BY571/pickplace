@@ -30,7 +30,7 @@ seconds = float(cli.get("seconds", 12.0 if policy_path else 8.0))
 until_done = bool(cli.get("until_done", True))
 env_overrides = OmegaConf.to_container(cli.env, resolve=True) if "env" in cli else {}
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=True)
 
@@ -84,8 +84,8 @@ def write_video(frames_iter, fps: int, still_step: int) -> tuple[str, int]:
 def run_scripted():
     import gymnasium as gym
 
-    import food_robot.envs  # noqa: F401
-    from food_robot.config import build_cell_env_cfg
+    import pickplace.envs  # noqa: F401
+    from pickplace.config import build_cell_env_cfg
 
     cfg = build_cell_env_cfg({**env_overrides, **RENDER_KEYS, "privileged_information": True})
     if cfg.action_mode != "ee_delta_pose":
@@ -118,8 +118,8 @@ def run_scripted():
 def run_policy():
     from torchrl.envs import ExplorationType, set_exploration_type
 
-    from food_robot.metrics import OUTCOME_TERMS
-    from food_robot.torchrl_env import make_env
+    from pickplace.metrics import OUTCOME_TERMS
+    from pickplace.torchrl_env import make_env
 
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sota-implementations", "ppo", "utils_pixels.py")
     spec = importlib.util.spec_from_file_location("utils_pixels", path)

@@ -15,7 +15,7 @@ from _common import finish
 
 TRANSPORT_GATE = "--transport-gate" in sys.argv
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True)
 
@@ -25,8 +25,8 @@ probe_grasp = importlib.util.module_from_spec(_spec)
 sys.modules["probe_grasp"] = probe_grasp
 _spec.loader.exec_module(probe_grasp)
 
-import food_robot.envs  # noqa: E402,F401
-from food_robot.config import build_cell_env_cfg  # noqa: E402
+import pickplace.envs  # noqa: E402,F401
+from pickplace.config import build_cell_env_cfg  # noqa: E402
 
 N = 16
 

@@ -1,4 +1,4 @@
-# food_robot/food/rigid.py
+# pickplace/food/rigid.py
 """Rigid spherical food item (e.g. a meatball) with friction and mass randomization."""
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.configclass import configclass
 from isaaclab_physx.sim.schemas import CollisionPropertiesCfg, RigidBodyPropertiesCfg
 
-from food_robot.envs.mdp.observations import asset_quat_w
-from food_robot.envs.mdp.events import reset_food_in_bowl
-from food_robot.food.base import FoodSourceCfg
+from pickplace.envs.mdp.observations import asset_quat_w
+from pickplace.envs.mdp.events import reset_food_in_bowl
+from pickplace.food.base import FoodSourceCfg
 
 
 @configclass

@@ -7,7 +7,7 @@ the unweighted ``("next", "reward_terms")`` vector and the scalar reward, the do
 flags, the trajectory id and the step count.
 
 A shard is ``<out>/storage`` (a ``LazyMemmapStorage``-backed ``TensorDictReplayBuffer``, load it with
-``food_robot.datasets.load_shard``) plus ``<out>/manifest.json``. Rows are time-major: row ``i`` and row
+``pickplace.datasets.load_shard``) plus ``<out>/manifest.json``. Rows are time-major: row ``i`` and row
 ``i + num_envs`` are consecutive steps of the same sub-env.
 
 Usage:
@@ -43,11 +43,11 @@ num_envs = int(cli.get("num_envs", 512))
 image_size = int(cli.get("image_size", 84))
 rollout_steps = int(cli.get("rollout_steps", 16))
 
-from food_robot.system import memory_used_gb  # noqa: E402
+from pickplace.system import memory_used_gb  # noqa: E402
 
 baseline_gb = memory_used_gb()
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=True)
 
@@ -57,11 +57,11 @@ from torchrl.collectors import Collector  # noqa: E402
 from torchrl.data import LazyMemmapStorage, TensorDictReplayBuffer  # noqa: E402
 from torchrl.envs import ExplorationType  # noqa: E402
 
-from food_robot.artifacts import artifacts_root, git_commit, read_json, sha256_file, write_json  # noqa: E402
-from food_robot.datasets import STORAGE_DIR  # noqa: E402
-from food_robot.metrics import OUTCOME_TERMS  # noqa: E402
-from food_robot.rewards import REWARD_TERMS  # noqa: E402
-from food_robot.torchrl_env import make_env, reward_weights  # noqa: E402
+from pickplace.artifacts import artifacts_root, git_commit, read_json, sha256_file, write_json  # noqa: E402
+from pickplace.datasets import STORAGE_DIR  # noqa: E402
+from pickplace.metrics import OUTCOME_TERMS  # noqa: E402
+from pickplace.rewards import REWARD_TERMS  # noqa: E402
+from pickplace.torchrl_env import make_env, reward_weights  # noqa: E402
 
 # Loaded by file path: with cameras enabled, Isaac Sim's bundled cv2/utils shadows `import utils`.
 _spec = importlib.util.spec_from_file_location("teacher_utils", os.path.join(TEACHER_DIR, "utils.py"))
@@ -101,7 +101,7 @@ class Stats:
 
     def update(self, data) -> None:
         # Under native auto-reset the running sums reset on the done row, so a finished episode's totals are
-        # the pre-step running sum plus this step's value (as in food_robot.training).
+        # the pre-step running sum plus this step's value (as in pickplace.training).
         done = data["next", "done"]
         if not bool(done.any()):
             return

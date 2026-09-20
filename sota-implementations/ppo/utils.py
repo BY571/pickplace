@@ -12,7 +12,7 @@ from torch import nn
 from torchrl.envs import ExplorationType
 from torchrl.modules import MLP, ProbabilisticActor, TanhNormal, ValueOperator
 
-from food_robot.keys import expand_in_keys
+from pickplace.keys import expand_in_keys
 
 
 def _is_image(shape: tuple[int, ...]) -> bool:

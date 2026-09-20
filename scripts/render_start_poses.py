@@ -62,7 +62,7 @@ env_cfg = {
     **env_overrides,
 }
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=True)
 
@@ -72,7 +72,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 from torchrl.envs.utils import step_mdp  # noqa: E402
 
-from food_robot.torchrl_env import make_env  # noqa: E402
+from pickplace.torchrl_env import make_env  # noqa: E402
 
 
 def to_uint8(img: torch.Tensor) -> np.ndarray:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from food_robot.artifacts import read_json
+from pickplace.artifacts import read_json
 
 STORAGE_DIR = "storage"
 MANIFEST_NAME = "manifest.json"

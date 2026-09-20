@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creates .venv with Isaac Sim 6.0.1, Isaac Lab v3.0.0-beta2.patch1 (PhysX), torch 2.10 and food_robot.
+# Creates .venv with Isaac Sim 6.0.1, Isaac Lab v3.0.0-beta2.patch1 (PhysX), torch 2.10 and pickplace.
 # Works on x86_64 (laptop, cu128) and aarch64 (DGX Spark, cu130).
 set -euo pipefail
 

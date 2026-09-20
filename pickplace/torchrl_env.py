@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from food_robot.metrics import OUTCOME_TERMS
+from pickplace.metrics import OUTCOME_TERMS
 
 
 def _unwrapped(env):
@@ -77,7 +77,7 @@ def _make_reward_terms_vector():
     from torchrl.data import Unbounded
     from torchrl.envs import Transform
 
-    from food_robot.rewards import DENSE_TERMS, EVENT_SOURCES, EVENT_TERMS, REWARD_TERMS
+    from pickplace.rewards import DENSE_TERMS, EVENT_SOURCES, EVENT_TERMS, REWARD_TERMS
 
     class RewardTermsVector(Transform):
         """Writes ``("next", "reward_terms")``: every reward term, unweighted, in ``REWARD_TERMS`` order.
@@ -121,8 +121,8 @@ def _make_reward_terms_vector():
 
 
 def reward_weights(env_cfg: Mapping) -> dict[str, float]:
-    from food_robot.config import DEFAULT_ENV
-    from food_robot.rewards import resolve_reward_weights
+    from pickplace.config import DEFAULT_ENV
+    from pickplace.rewards import resolve_reward_weights
 
     return resolve_reward_weights({**DEFAULT_ENV, **env_cfg})
 
@@ -134,7 +134,7 @@ def make_env(env_cfg: Mapping):
     each algorithm. No running-statistics transforms here: terminal next-observations are NaN
     under native auto-reset. ``("next", "outcome", <term>)`` marks how each finished episode ended.
 
-    ``("next", "reward_terms")`` holds every reward term unweighted (``food_robot.rewards.REWARD_TERMS``
+    ``("next", "reward_terms")`` holds every reward term unweighted (``pickplace.rewards.REWARD_TERMS``
     order); the training reward ``("next", "reward")`` is ``LineariseRewards`` over it with the weights of
     ``env_cfg["reward_set"]`` plus overrides (see ``reward_weights``). ``episode_reward`` is the running sum
     of ``reward`` and ``episode_reward_terms`` the per-term running sum.
@@ -144,9 +144,9 @@ def make_env(env_cfg: Mapping):
     from torchrl.envs import Compose, LineariseRewards, RewardSum, StepCounter, TransformedEnv
     from torchrl.envs.libs.isaac_lab import IsaacLabWrapper
 
-    import food_robot.envs  # noqa: F401  (gym registration)
-    from food_robot.config import DEFAULT_ENV, build_cell_env_cfg
-    from food_robot.rewards import weight_vector
+    import pickplace.envs  # noqa: F401  (gym registration)
+    from pickplace.config import DEFAULT_ENV, build_cell_env_cfg
+    from pickplace.rewards import weight_vector
 
     cfg = build_cell_env_cfg(env_cfg)
     task = env_cfg.get("task", DEFAULT_ENV["task"])

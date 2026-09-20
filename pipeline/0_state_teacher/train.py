@@ -36,7 +36,7 @@ def main(cfg: DictConfig):
     if cfg.env.cameras:
         raise ValueError("The state teacher trains with cameras off; set env.cameras=false.")
 
-    from food_robot.app import launch_app
+    from pickplace.app import launch_app
 
     launch_app(headless=cfg.app.headless, enable_cameras=False, device=cfg.env.device)
 
@@ -55,10 +55,10 @@ def main(cfg: DictConfig):
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
 
-    from food_robot.artifacts import git_commit, new_run_dir, update_json, write_json
-    from food_robot.system import memory_used_gb
-    from food_robot.torchrl_env import make_env
-    from food_robot.training import SuccessStreak, episode_metrics
+    from pickplace.artifacts import git_commit, new_run_dir, update_json, write_json
+    from pickplace.system import memory_used_gb
+    from pickplace.torchrl_env import make_env
+    from pickplace.training import SuccessStreak, episode_metrics
 
     tu = _load_local_module("utils")
 

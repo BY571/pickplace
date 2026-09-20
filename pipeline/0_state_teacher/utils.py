@@ -19,8 +19,8 @@ from torch import nn
 from torchrl.envs import ExplorationType
 from torchrl.modules import MLP, ProbabilisticActor, TanhNormal, ValueOperator
 
-from food_robot.artifacts import git_commit, read_json, sha256_file, write_json
-from food_robot.keys import expand_in_keys
+from pickplace.artifacts import git_commit, read_json, sha256_file, write_json
+from pickplace.keys import expand_in_keys
 
 
 class StateNet(nn.Module):

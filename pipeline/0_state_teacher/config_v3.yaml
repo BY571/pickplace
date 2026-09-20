@@ -6,7 +6,7 @@ defaults:
   - _self_
 
 env:
-  reward_set: simple_v3        # food_robot/reward_sets/simple_v3.yaml (return_home + motion penalties)
+  reward_set: simple_v3        # pickplace/reward_sets/simple_v3.yaml (return_home + motion penalties)
   success_requires_home: true  # success needs the TCP within env home_tolerance (default 0.05 m) of home
 
 collector:

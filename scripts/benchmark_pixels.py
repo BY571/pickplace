@@ -61,12 +61,12 @@ def memory_gb() -> tuple[float, float]:
 
 
 def worker(kw):
-    from food_robot.app import launch_app
+    from pickplace.app import launch_app
 
     launch_app(headless=True, enable_cameras=True)
     import torch
 
-    from food_robot.torchrl_env import make_env
+    from pickplace.torchrl_env import make_env
 
     n, image, steps = int(kw["num_envs"]), int(kw["image"]), int(kw["steps"])
     t0 = time.monotonic()

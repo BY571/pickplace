@@ -5,8 +5,8 @@ from __future__ import annotations
 import importlib
 from collections.abc import Mapping
 
-ARMS = {"franka": "food_robot.arms.franka:FRANKA_CFG"}
-FOODS = {"rigid": "food_robot.food.rigid:RigidFoodCfg"}
+ARMS = {"franka": "pickplace.arms.franka:FRANKA_CFG"}
+FOODS = {"rigid": "pickplace.food.rigid:RigidFoodCfg"}
 
 DEFAULT_ENV: dict = {
     "task": "FoodRobot-Cell-v0",
@@ -24,7 +24,7 @@ DEFAULT_ENV: dict = {
     "robot_reset": {"position_range": [-0.02, 0.02], "velocity_range": [0.0, 0.0]},
     "seed": 0,
     "device": "cuda:0",
-    # Legacy one-shot keys: None defers to the reward set (see food_robot.rewards.resolve_reward_weights).
+    # Legacy one-shot keys: None defers to the reward set (see pickplace.rewards.resolve_reward_weights).
     "success_bonus": None,
     "bowl_failure_penalty": None,
     "food_drop_penalty": None,
@@ -69,7 +69,7 @@ def _tuples(d: Mapping) -> dict:
 
 def _geometry_kwargs(belt_kwargs: dict) -> dict:
     """Turn nested ``belt.bowl`` / ``belt.pallet`` dicts into geometry cfg instances."""
-    from food_robot.assets.usd_builders import BowlGeometry, PalletGeometry
+    from pickplace.assets.usd_builders import BowlGeometry, PalletGeometry
 
     out = dict(belt_kwargs)
     if "bowl" in out and isinstance(out["bowl"], Mapping):
@@ -86,9 +86,9 @@ def build_cell_env_cfg(env_cfg: Mapping):
     if unknown:
         raise ValueError(f"Unknown env config keys {sorted(unknown)}. Allowed: {sorted(DEFAULT_ENV)}")
 
-    from food_robot.belt import BeltCfg
-    from food_robot.envs.cell_env_cfg import FoodCellEnvCfg, scale_physx_buffers
-    from food_robot.rewards import DENSE_TERMS, isaac_weight, resolve_reward_weights
+    from pickplace.belt import BeltCfg
+    from pickplace.envs.cell_env_cfg import FoodCellEnvCfg, scale_physx_buffers
+    from pickplace.rewards import DENSE_TERMS, isaac_weight, resolve_reward_weights
 
     c = {**DEFAULT_ENV, **env_cfg}
     weights = resolve_reward_weights(c)

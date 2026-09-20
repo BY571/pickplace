@@ -11,13 +11,13 @@ from omegaconf import OmegaConf
 cli = OmegaConf.from_dotlist(sys.argv[1:])
 env_cfg = OmegaConf.to_container(cli.env, resolve=True) if "env" in cli else {}
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=bool(env_cfg.get("cameras", True)))
 
 from torchrl.envs.utils import check_env_specs  # noqa: E402
 
-from food_robot.torchrl_env import make_env, termination_stats  # noqa: E402
+from pickplace.torchrl_env import make_env, termination_stats  # noqa: E402
 
 env = make_env(env_cfg)
 print("batch_size:", env.batch_size)

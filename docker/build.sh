@@ -4,7 +4,7 @@
 #      built unmodified from its Dockerfile.base (reuses Isaac Lab's arm64
 #      handling: GL/X11 dev headers, nlopt source build, etc. — do not
 #      re-implement any of that here).
-#   2. food-robot:latest — our image on top, adding TorchRL + food_robot.
+#   2. food-robot:latest — our image on top, adding TorchRL + pickplace.
 set -euo pipefail
 
 ISAACLAB_TAG="v3.0.0-beta2.patch1"

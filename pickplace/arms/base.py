@@ -1,4 +1,4 @@
-# food_robot/arms/base.py
+# pickplace/arms/base.py
 """Arm plug-in configuration: everything the env needs to know about a manipulator."""
 
 from __future__ import annotations

@@ -81,7 +81,7 @@ def memory_gb() -> tuple[float, float]:
 
 def worker(kw):
     """Steps/s of one layer of the collection stack with random actions (``policy``: actor actions)."""
-    from food_robot.app import launch_app
+    from pickplace.app import launch_app
 
     launch_app(headless=True, enable_cameras=False)
     import torch
@@ -92,8 +92,8 @@ def worker(kw):
     if kind == "raw":
         import gymnasium as gym
 
-        import food_robot.envs  # noqa: F401  (gym registration)
-        from food_robot.config import DEFAULT_ENV, build_cell_env_cfg
+        import pickplace.envs  # noqa: F401  (gym registration)
+        from pickplace.config import DEFAULT_ENV, build_cell_env_cfg
 
         env = gym.make(DEFAULT_ENV["task"], cfg=build_cell_env_cfg(env_cfg))
         env.reset()
@@ -106,7 +106,7 @@ def worker(kw):
 
         td = None
     else:
-        from food_robot.torchrl_env import make_env
+        from pickplace.torchrl_env import make_env
 
         env = make_env(env_cfg)
         if kind == "wrapper":

@@ -1,8 +1,8 @@
 import torch
 from tensordict import TensorDict
 
-from food_robot.artifacts import write_json
-from food_robot.datasets import STORAGE_DIR, load_shard, shard_manifest
+from pickplace.artifacts import write_json
+from pickplace.datasets import STORAGE_DIR, load_shard, shard_manifest
 
 FRAMES, STRIDE = 8, 2
 

@@ -25,20 +25,20 @@ num_envs = int(cli.get("num_envs", 256))
 force = bool(cli.get("force", False))
 seed = int(cli.get("seed", 0))
 
-from food_robot.system import memory_used_gb  # noqa: E402
+from pickplace.system import memory_used_gb  # noqa: E402
 
 baseline_gb = memory_used_gb()
 
-from food_robot.app import launch_app  # noqa: E402
+from pickplace.app import launch_app  # noqa: E402
 
 app = launch_app(headless=True, enable_cameras=False)
 
 import torch  # noqa: E402
 from torchrl.envs import ExplorationType, set_exploration_type  # noqa: E402
 
-from food_robot.artifacts import read_json, update_json  # noqa: E402
-from food_robot.torchrl_env import make_env  # noqa: E402
-from food_robot.training import first_episode_metrics  # noqa: E402
+from pickplace.artifacts import read_json, update_json  # noqa: E402
+from pickplace.torchrl_env import make_env  # noqa: E402
+from pickplace.training import first_episode_metrics  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("teacher_utils", os.path.join(HERE, "utils.py"))
 tu = importlib.util.module_from_spec(_spec)

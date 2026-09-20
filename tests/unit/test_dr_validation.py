@@ -1,6 +1,6 @@
 import pytest
 
-from food_robot.timing import (
+from pickplace.timing import (
     validate_bowl_on_pallet,
     validate_pallet_start,
     validate_supply_bowl_range,

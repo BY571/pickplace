@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 from tensordict import TensorDictBase
 
-from food_robot.metrics import OUTCOME_TERMS, outcome_rates
-from food_robot.rewards import REWARD_TERMS
+from pickplace.metrics import OUTCOME_TERMS, outcome_rates
+from pickplace.rewards import REWARD_TERMS
 
 
 def _metrics(data: TensorDictBase, done: torch.Tensor, prefix: str) -> dict[str, float]:

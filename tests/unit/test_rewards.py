@@ -1,6 +1,6 @@
 import pytest
 
-from food_robot import rewards as R
+from pickplace import rewards as R
 
 STAGED = {
     "reach_food": 1.0, "grasp": 2.0, "grasp_lift": 5.0, "transport": 10.0, "transport_fine": 5.0,
@@ -72,7 +72,7 @@ def test_older_reward_sets_leave_return_home_at_zero():
 
 
 def test_env_options_home_defaults_and_unknown_keys_raise():
-    from food_robot.config import DEFAULT_ENV, build_cell_env_cfg
+    from pickplace.config import DEFAULT_ENV, build_cell_env_cfg
 
     assert DEFAULT_ENV["success_requires_home"] is False  # every existing config keeps today's success
     assert DEFAULT_ENV["home_tolerance"] == 0.05  # [m], TCP distance to its home position
@@ -81,7 +81,7 @@ def test_env_options_home_defaults_and_unknown_keys_raise():
 
 
 def test_default_robot_reset_matches_todays_reset_joints_offset():
-    from food_robot.config import DEFAULT_ENV
+    from pickplace.config import DEFAULT_ENV
 
     # every existing config keeps today's tight reset (reset_joints_by_offset's params before robot_reset existed)
     assert DEFAULT_ENV["robot_reset"] == {"position_range": [-0.02, 0.02], "velocity_range": [0.0, 0.0]}

@@ -2,7 +2,7 @@
 # Runs a command inside the food-robot image, bind-mounting the repo so code
 # edits on the host take effect without rebuilding, and using the named volumes
 # listed in docker/volumes.sh for the Isaac Sim / Isaac Lab caches plus a
-# food_robot cache.
+# pickplace cache.
 #
 # Usage: ./docker/run.sh <command> [args...]
 #

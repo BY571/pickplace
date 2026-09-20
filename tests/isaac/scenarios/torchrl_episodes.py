@@ -8,7 +8,7 @@ episode quickly and repeatedly.
 
 from _common import finish
 
-from food_robot.app import launch_app
+from pickplace.app import launch_app
 
 app = launch_app(headless=True)
 
@@ -16,8 +16,8 @@ import torch  # noqa: E402
 from torchrl.modules import MLP, ValueOperator  # noqa: E402
 from torchrl.objectives.value.advantages import GAE  # noqa: E402
 
-from food_robot.metrics import OUTCOME_TERMS  # noqa: E402
-from food_robot.torchrl_env import make_env, reward_term_stats, termination_stats  # noqa: E402
+from pickplace.metrics import OUTCOME_TERMS  # noqa: E402
+from pickplace.torchrl_env import make_env, reward_term_stats, termination_stats  # noqa: E402
 
 NUM_ENVS = 4
 NUM_STEPS = 600

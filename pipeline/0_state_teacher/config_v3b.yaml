@@ -7,7 +7,7 @@ defaults:
   - _self_
 
 env:
-  reward_set: simple_v3b       # food_robot/reward_sets/simple_v3b.yaml (simple_v3 with 10x smaller penalties)
+  reward_set: simple_v3b       # pickplace/reward_sets/simple_v3b.yaml (simple_v3 with 10x smaller penalties)
   success_requires_home: true  # success needs the TCP within env home_tolerance (default 0.05 m) of home
 
 init_checkpoint: /workspace/artifacts/teachers/teacher_simple_v2_600M_20260918_1307/checkpoints/ppo_teacher_390070272.pt

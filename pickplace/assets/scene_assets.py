@@ -7,8 +7,8 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab_physx.sim.schemas import ArticulationRootPropertiesCfg, RigidBodyPropertiesCfg
 
-from food_robot.assets.usd_builders import BowlGeometry, PalletGeometry, bowl_usd_path, pallet_usd_path
-from food_robot.belt import BELT_COLOR
+from pickplace.assets.usd_builders import BowlGeometry, PalletGeometry, bowl_usd_path, pallet_usd_path
+from pickplace.belt import BELT_COLOR
 
 
 def make_pallet_cfg(

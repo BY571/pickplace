@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from food_robot.datasets import load_shard, shard_manifest
-from food_robot.rewards import REWARD_TERMS
+from pickplace.datasets import load_shard, shard_manifest
+from pickplace.rewards import REWARD_TERMS
 from test_teacher_smoke import _train  # a tiny teacher checkpoint, with its short-episode env overrides
 
 pytestmark = pytest.mark.isaac

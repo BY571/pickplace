@@ -48,7 +48,7 @@ def main(cfg: DictConfig):
     if not cfg.env.cameras:
         raise ValueError("ppo_pixels.py trains from camera observations; set env.cameras=true.")
 
-    from food_robot.app import launch_app
+    from pickplace.app import launch_app
 
     launch_app(headless=cfg.app.headless, enable_cameras=True, device=cfg.env.device)
 
@@ -62,7 +62,7 @@ def main(cfg: DictConfig):
     from torchrl.objectives.value.advantages import GAE
     from torchrl.record.loggers import generate_exp_name, get_logger
 
-    from food_robot.torchrl_env import make_env, reward_term_stats
+    from pickplace.torchrl_env import make_env, reward_term_stats
 
     save_checkpoint = _load_local_module("utils").save_checkpoint
     up = _load_local_module("utils_pixels")

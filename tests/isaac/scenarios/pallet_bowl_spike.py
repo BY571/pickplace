@@ -2,7 +2,7 @@
 
 from _common import finish
 
-from food_robot.app import launch_app
+from pickplace.app import launch_app
 
 app = launch_app(headless=True)
 
@@ -12,8 +12,8 @@ import isaaclab.sim as sim_utils  # noqa: E402
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # noqa: E402
 from isaaclab.utils.configclass import configclass  # noqa: E402
 
-from food_robot.assets.scene_assets import make_bowl_cfg, make_pallet_cfg  # noqa: E402
-from food_robot.assets.usd_builders import BowlGeometry, PalletGeometry  # noqa: E402
+from pickplace.assets.scene_assets import make_bowl_cfg, make_pallet_cfg  # noqa: E402
+from pickplace.assets.usd_builders import BowlGeometry, PalletGeometry  # noqa: E402
 
 PALLET = PalletGeometry()
 Z0 = 0.5

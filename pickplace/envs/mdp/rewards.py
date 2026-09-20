@@ -8,8 +8,8 @@ import torch
 
 from isaaclab.managers import SceneEntityCfg
 
-from food_robot.envs.mdp.observations import grasped_mask
-from food_robot.envs.mdp.terminations import released_in_bowl_mask, tcp_home_distance
+from pickplace.envs.mdp.observations import grasped_mask
+from pickplace.envs.mdp.terminations import released_in_bowl_mask, tcp_home_distance
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv

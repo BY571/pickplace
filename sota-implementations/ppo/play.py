@@ -30,7 +30,7 @@ def _load_local_utils():
 def main(cfg: DictConfig):
     if not cfg.play.checkpoint:
         raise ValueError("Set play.checkpoint=/path/to/checkpoint.pt")
-    from food_robot.app import launch_app
+    from pickplace.app import launch_app
 
     # cameras must be set at app launch, before the checkpoint (and its saved env.cameras) can be read;
     # pass env.cameras=<value> matching the checkpoint's training config, or the check below raises.
@@ -39,7 +39,7 @@ def main(cfg: DictConfig):
     import torch
     from torchrl.envs import ExplorationType, set_exploration_type
 
-    from food_robot.torchrl_env import make_env, termination_stats
+    from pickplace.torchrl_env import make_env, termination_stats
 
     make_ppo_models = _load_local_utils().make_ppo_models
 

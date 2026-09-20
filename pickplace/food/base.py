@@ -1,4 +1,4 @@
-# food_robot/food/base.py
+# pickplace/food/base.py
 """Food-source plug-in: the asset plus the manager terms it contributes."""
 
 from __future__ import annotations

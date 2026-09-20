@@ -61,10 +61,19 @@ manifest = shard_manifest("/workspace/artifacts/shards/expert_v3c")
 
 Mixing tiers and relabelling rewards belongs to stage 2, not here.
 
-## Tiers (v3c teacher, `teacher_v3c_20260920T120408Z`)
+## Tiers (collected 2026-09-20 from `teachers/teacher_v3c_20260920T120408Z`)
 
-| Tier | Checkpoint | Noise σ | Frames | Success rate | Size | Speed |
-|---|---|---|---|---|---|---|
-| expert | `ppo_teacher_final.pt` (eval 0.984) | 0 | | | | |
-| medium | `ppo_teacher_110100480.pt` (eval 0.652) | 0 | | | | |
-| noisy | `ppo_teacher_final.pt` | | | | | |
+All three at 84 px, `num_envs=512`, `rollout_steps=16`, 1 M frames (rounded up to 1,007,616 = 123 batches),
+in `$FOOD_ROBOT_ARTIFACTS/shards/`. Success rate is the shard's own (every episode that finished during the
+collection), not the checkpoint's evaluation.
+
+| Tier | Shard | Checkpoint (eval success) | σ | Seed | Success | Size | Speed |
+|---|---|---|---|---|---|---|---|
+| expert | `expert_v3c` | `ppo_teacher_final.pt` (0.984) | 0 | 0 | **0.983** | 40.1 GB | 11.4 M frames/h (317 s) |
+| medium | `medium_v3c` | `ppo_teacher_110100480.pt` (0.652) | 0 | 1 | **0.674** | 40.1 GB | 11.6 M frames/h (314 s) |
+| noisy | `noisy_v3c` | `ppo_teacher_final.pt` (0.984) | 0.2 | 2 | **0.841** | 40.1 GB | 11.2 M frames/h (323 s) |
+
+The tiers fail in different ways, which is the point of mixing them: the medium teacher mostly misses the bowl
+(31% `bowl_exited_zone`, mean episode length 164 steps vs the expert's 114), while the noisy expert mostly drops
+food (9.5% `food_off_table`, 5% missed). σ = 0.2 came from 80 k-frame probes of the expert checkpoint:
+σ 0.10 → 0.956, σ 0.15 → 0.916, σ 0.20 → 0.835 success. Peak host memory was 31 GB (512 envs, 84 px).

@@ -4,18 +4,19 @@ Two modes:
   mode=grid (default): one env per tile, reset once, settle a few steps with zero-motion actions, then
                         capture each env's scene camera and tile them into one PNG.
   mode=overlay: a single env, reset+settle N times (default 12), capturing the same (tight, table-framed)
-                scene camera each time; a classic multi-exposure: the N frames are combined pixel-wise
-                (combine=max by default -- the arm is brighter than the table/floor, so max keeps it visible
-                at every sampled pose; mean/min are also available but read as a much fainter haze), then the
-                last pose is pasted back in at full opacity (via a simple diff mask) as a crisp reference pose.
+                scene camera each time; the per-pixel MEDIAN across all frames is the static-scene background
+                (table/belt/bowls -- and the median removes the arm and the randomized food ball too, since
+                each occupies any given pixel in only a minority of the poses), each sampled pose is alpha-
+                blended on top at `ghost_alpha` (only where it differs from the median, so the blend doesn't
+                dim the background), and the LAST pose is pasted back in at full opacity as a crisp reference.
 
 Usage:
     python scripts/render_start_poses.py [out=outputs/render/start_poses.png] [tiles=12] [cols=4]
                                          [env.robot_reset.position_range=[-0.25,0.25]]
                                          [env.robot_reset.velocity_range=[-0.1,0.1]]
     python scripts/render_start_poses.py mode=overlay [out=outputs/render/start_poses_overlay.png] \\
-                                         [poses=12] [combine=mean|min|max] \\
-                                         [env.robot_reset.position_range=[-0.25,0.25]] \\
+                                         [poses=12] [ghost_alpha=0.25] \\
+                                         [env.robot_reset.position_range=[-0.5,0.5]] \\
                                          [env.robot_reset.velocity_range=[-0.1,0.1]]
 
 Defaults to the v2r fine-tune's wide randomization (+-0.25 rad / +-0.1 rad/s); pass the training default
@@ -37,10 +38,7 @@ tiles = int(cli.get("tiles", 12))
 cols = int(cli.get("cols", 4))
 settle_steps = int(cli.get("settle_steps", 5))
 poses = int(cli.get("poses", 12))
-# mean (classic multi-exposure) leaves the arm as only a faint haze against the table; max keeps the arm
-# (brighter than the table/floor) fully visible at every sampled pose, which reads far more legibly as
-# "several start poses at once" -- verified by eye, see scripts/render_start_poses.py usage docstring.
-combine = str(cli.get("combine", "max"))
+ghost_alpha = float(cli.get("ghost_alpha", 0.25))
 diff_threshold = int(cli.get("diff_threshold", 12))
 
 env_overrides = OmegaConf.to_container(cli.env, resolve=True) if "env" in cli else {}
@@ -101,30 +99,27 @@ if mode == "overlay":
         frames.append(to_uint8(u.scene["render_cam"].data.output["rgb"][0]))
 
     stack = np.stack(frames).astype(np.float32)  # (poses, H, W, 3)
-    if combine == "min":
-        base = stack.min(axis=0)  # arm bright on darker scene -> min keeps the (darker) static scene sharp
-    elif combine == "max":
-        base = stack.max(axis=0)  # -> max keeps the (brighter) arm visible in every pose
-    else:
-        base = stack.mean(axis=0)  # classic multi-exposure: every pose shows through equally translucent
+    median_bg = np.median(stack, axis=0)  # (H, W, 3) static scene: arm and food ball vote out as minorities
 
-    # Paste the last pose back in at full opacity as a crisp reference, via a simple diff mask. The mask is
-    # computed against the per-pixel MEDIAN (a clean background estimate, since the arm occupies any single
-    # pixel in a minority of the poses) rather than against `base`, which is itself already ghost-smeared and
-    # would otherwise flag the arm's entire swept envelope (erasing the other poses' ghosts, not just pose 12).
-    last = stack[-1]
-    median_bg = np.median(stack, axis=0)
-    diff = np.abs(last - median_bg).max(axis=-1)  # (H, W)
-    mask = (diff > diff_threshold).astype(np.uint8) * 255
-    mask = cv2.dilate(mask, np.ones((5, 5), np.uint8), iterations=1)
-    mask = cv2.GaussianBlur(mask, (7, 7), 0)
-    mask_f = (mask.astype(np.float32) / 255.0)[..., None]
-    canvas = base * (1 - mask_f) + last * mask_f
+    kernel = np.ones((5, 5), np.uint8)
+
+    def pose_mask(frame: np.ndarray) -> np.ndarray:
+        diff = np.abs(frame - median_bg).max(axis=-1)  # (H, W)
+        mask = (diff > diff_threshold).astype(np.uint8) * 255
+        mask = cv2.dilate(mask, kernel, iterations=1)
+        mask = cv2.GaussianBlur(mask, (7, 7), 0)
+        return (mask.astype(np.float32) / 255.0)[..., None]
+
+    canvas = median_bg.copy()
+    for i, frame in enumerate(stack):
+        mask_f = pose_mask(frame)
+        a = 1.0 if i == len(stack) - 1 else ghost_alpha  # every sampled pose translucent, last one crisp
+        canvas = canvas * (1 - mask_f * a) + frame * (mask_f * a)
 
     grid = canvas.clip(0, 255).astype(np.uint8)
     caption = (
         f"robot_reset position_range={robot_reset['position_range']} "
-        f"velocity_range={robot_reset['velocity_range']} poses={poses} combine={combine}"
+        f"velocity_range={robot_reset['velocity_range']} poses={poses} ghost_alpha={ghost_alpha}"
     )
 else:
     td = env.reset()

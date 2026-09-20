@@ -30,13 +30,13 @@ network:                             # one Nature-CNN per camera -> fusion MLP; 
   fusion: [512, 256]
 
 eval:
-  interval: 5_000                    # gradient steps between online evaluations (0 disables, cameras off)
+  interval: 10_000                   # gradient steps between online evaluations (0 disables, cameras off)
   num_envs: 128
   image_size: 84
   seed: 0
 
 checkpoint:
-  interval: 25_000                   # gradient steps; each checkpoint carries its own online evaluation
+  interval: 50_000                   # gradient steps; each checkpoint carries its own online evaluation
 
 app:
   headless: true
@@ -53,7 +53,7 @@ logger:
 
 optim:
   lr: 3.0e-4
-  max_grad_norm: 1.0
+  max_grad_norm: 10.0     # grad norms settle near 3; this only clips outliers (measured, see ../README.md)
 
 hydra:
   job:

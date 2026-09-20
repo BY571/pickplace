@@ -1,0 +1,62 @@
+# Stage 2.1 — behaviour-cloning baseline on the camera shards.
+# Everything above `optim` is the shared comparison protocol: it must stay identical across the algorithms
+# in this folder (tests/unit/test_offline_configs.py asserts that). Only `optim`/`loss` differ.
+
+device: cuda:0
+seed: 0
+matmul_precision: high
+
+data:
+  shards: [expert_v3c, medium_v3c]   # names resolve under $FOOD_ROBOT_ARTIFACTS/shards
+  proportions: [0.5, 0.5]            # rows per batch drawn from each shard
+  obs_keys:                          # cameras only: the student must infer arm/gripper state from pixels
+    - [pixels, overview_rgb]
+    - [pixels, wrist_rgb]
+  include_terminals: true            # keep terminated rows as masked-bootstrap pairs (the success bonus)
+
+batch_size: 256
+gradient_steps: 150_000
+max_hours: null                      # stop cleanly (final checkpoint + eval) after this much wall time
+reward_scale: 0.1                    # applied to the sampled reward before the loss (BC ignores the reward)
+log_interval: 200                    # gradient steps per METRICS line
+prefetch_depth: 6                    # batches read ahead from the memmaps by background threads
+prefetch_workers: 3
+
+network:                             # one Nature-CNN per camera -> fusion MLP; separate nets per head
+  cnn_channels: [32, 64, 64]
+  cnn_kernels: [8, 4, 3]
+  cnn_strides: [4, 2, 1]
+  image_embed: 256
+  fusion: [512, 256]
+
+eval:
+  interval: 5_000                    # gradient steps between online evaluations (0 disables, cameras off)
+  num_envs: 128
+  image_size: 84
+  seed: 0
+
+checkpoint:
+  interval: 25_000                   # gradient steps; each checkpoint carries its own online evaluation
+
+app:
+  headless: true
+
+run:
+  dir: null                          # null: $FOOD_ROBOT_ARTIFACTS/students/<name>
+  name: null                         # null: bc_<UTC timestamp>
+
+logger:
+  backend: wandb                     # wandb | csv | tensorboard | null
+  project_name: food_robot
+  group: offline_rl
+  exp_name: bc
+
+optim:
+  lr: 3.0e-4
+  max_grad_norm: 1.0
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/offline_bc/${now:%Y-%m-%d_%H-%M-%S}

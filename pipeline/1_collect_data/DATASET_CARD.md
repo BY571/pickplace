@@ -82,14 +82,14 @@ The teacher that generated this data was trained against the `simple_v3b` reward
 |---|---|---|---|
 | `reach_food` | dense | 1.0 | shaping reward for closing the end-effector's distance to the food item |
 | `grasp` | dense | 2.0 | reward while the gripper is closed around the food (grasp achieved) |
-| `grasp_lift` | dense | 5.0 | reward for lifting the grasped food clear of the supply tray |
-| `transport` | dense | 10.0 | shaping reward for carrying the grasped food toward the target bowl |
-| `food_in_bowl` | dense | 20.0 | reward while the food is positioned over / settled in the bowl |
-| `return_home` | dense | 10.0 | shaping reward for moving the hand back toward its start pose after placing |
+| `grasp_lift` | dense | 5.0 | reward while the grasped food is lifted more than 10 cm above the table |
+| `transport` | dense | 10.0 | shaping reward for carrying the held (grasped *and* lifted) food toward a point above the moving bowl |
+| `food_in_bowl` | dense | 20.0 | reward while the food is inside the bowl **and released** (the gripper must let go) |
+| `return_home` | dense | 10.0 | shaping reward for bringing the hand back to its home position; paid only while the food is already released in the bowl |
 | `success` | event | 150.0 | one-shot bonus on the step the episode ends in success |
 | `action_rate` | dense | -0.01 | small penalty on the size of action changes (smoothness) |
 | `joint_vel` | dense | -0.001 | small penalty on joint velocities (smoothness) |
-| `bowl_disturbance` | dense | -10.0 | penalty for disturbing/knocking the bowl |
+| `bowl_disturbance` | dense | -10.0 | penalty proportional to how far the bowl has been pushed from where its pallet carries it |
 
 (Three more terms exist in the reward vocabulary — `transport_fine`, `bowl_failure`, `food_dropped` — but
 carry **zero weight** in `simple_v3b`, so they don't contribute to `("next", "reward")` in this dataset;
@@ -101,9 +101,11 @@ for a full second, independent of control frequency. Event terms (`success`, and
 `bowl_failure` / `food_dropped`) are one-shot 0/1 bonuses applied only on the step the episode ends that way.
 
 **Success condition:** an episode scores `success` and ends when the food item has settled in the bowl
-**and** the end-effector is back within 5 cm of its start pose (`success_requires_home: true` in the
-generating config). Because start poses are randomized (below), "home" is that episode's own randomized
-start, not a fixed target — the teacher has to actually return there, not converge to one canonical pose.
+**and** the end-effector is back within 5 cm of its *home* position (`success_requires_home: true` in the
+generating config). "Home" is one fixed point in the cell frame — the TCP position at the arm's default joint
+pose, measured once (`ArmCfg.home_tcp_pos`) — and is the same target in every episode, independent of that
+episode's randomized start pose. It is defined in end-effector position space rather than joint space,
+because the policy commands end-effector poses and the Franka's redundant elbow is free to drift.
 
 **Start-pose randomization:** each episode starts from the robot's default pose perturbed by uniform noise:
 joint positions ±0.25 rad, joint velocities ±0.1 rad/s.

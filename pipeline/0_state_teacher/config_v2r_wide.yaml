@@ -1,0 +1,32 @@
+# Stage 0 teacher v2r_wide: the widest start-pose randomization, +-0.75 rad / +-0.1 rad/s, warm-started from
+# the v2r_long run (+-0.25 rad). Two steps rather than one jump: v2 (+-0.02) -> v2r_long (+-0.25) -> this.
+# +-0.75 was checked before training (scripts/render_start_poses.py mode=overlay position_range=[-0.75,0.75],
+# see ~/Pictures/food-robot/start_poses_overlay_075.png): no sampled pose intersects the table, belt, tray or
+# bowl, and 36 samples tripped no termination in the first steps after reset. Extreme starts point the arm away
+# from the tray, so some episodes may be unwinnable inside the 5 s place window -- expect eval success below
+# the narrower ranges, and judge this run by the continuous demo, not only by episodic success.
+# Launch: python pipeline/0_state_teacher/train.py --config-name config_v2r_wide
+defaults:
+  - config
+  - _self_
+
+env:
+  reward_set: simple_v2        # unchanged from the v2 teacher this fine-tunes
+  robot_reset:
+    position_range: [-0.75, 0.75]   # [rad], vs. v2r_long's [-0.25, 0.25] and the training default [-0.02, 0.02]
+    velocity_range: [-0.1, 0.1]     # [rad/s], vs. the training default [0.0, 0.0]
+
+init_checkpoint: /workspace/artifacts/teachers/teacher_v2r_long_20260920T070700Z/checkpoints/ppo_teacher_final.pt
+
+collector:
+  total_frames: 300_000_000    # fine-tuning: shorter horizon than a from-scratch run
+
+optim:
+  lr: 1.0e-4                   # fine-tuning: lower than the from-scratch 3.0e-4
+
+early_stop:
+  success_rate: 0.95           # below v2r_long's 0.97: the widest starts include episodes that cannot be won
+  consecutive_evals: 4         # inside the place window, so the ceiling is lower here
+
+logger:
+  exp_name: state_teacher_v2r_wide

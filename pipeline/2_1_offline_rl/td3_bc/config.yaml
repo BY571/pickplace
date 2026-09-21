@@ -58,7 +58,11 @@ optim:
 
 loss:                     # TorchRL sota-implementations/td3_bc/config.yaml unless noted
   gamma: 0.99
-  alpha: 2.5              # Q-vs-BC balance; the loss rescales the Q term by alpha / mean|Q|
+  alpha: 0.025            # Q-vs-BC balance; the loss rescales the Q term by alpha / mean|Q|.
+                          # sota/paper: 2.5. Measured here (20 k steps, expert_v3c, image+proprio):
+                          # alpha 2.5 -> 0.00 success, 0.25 -> 0.23, 0.025 -> 0.65. On zero-action-noise
+                          # expert data Q(s,.) is flat in the action, so the Q gradient is noise and
+                          # alpha is the knob that switches it off. See ../README.md.
   policy_noise: 0.2       # std of the target-policy smoothing noise
   noise_clip: 0.5         # that noise is clipped to +-this
   policy_update_delay: 2  # gradient steps per actor update (and per target update)

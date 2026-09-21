@@ -12,7 +12,7 @@ Every algorithm in this folder gets the same everything except its loss:
 | | |
 |---|---|
 | **Data** | `expert_v3c` + `medium_v3c`, 50/50 rows per batch (2,014,214 legal transitions, 14,333 of them terminal) |
-| **Student inputs** | **cameras only** by default — `("pixels","overview_rgb")` and `("pixels","wrist_rgb")`, 84x84x3 uint8, **one frame each**. No proprioception, no privileged state, no bowl pose. Configurable via `network.in_keys` (group names or leaf keys, expanded with `pickplace.keys.expand_in_keys`); vector groups go through an MLP branch and concatenate with the CNN features (`pickplace.offline.PixelNet`, same shape as `sota-implementations/ppo/utils_pixels.py::PixelsNet`). |
+| **Student inputs** | **image only** by default — `("pixels","overview_rgb")` and `("pixels","wrist_rgb")`, 84x84x3 uint8, **one frame each**. No proprioception, no privileged state, no bowl pose. Configurable via `network.in_keys` (group names or leaf keys, expanded with `pickplace.keys.expand_in_keys`); vector groups go through an MLP branch and concatenate with the CNN features (`pickplace.offline.PixelNet`, same shape as `sota-implementations/ppo/utils_pixels.py::PixelsNet`). |
 | **Networks** | one Nature-CNN encoder per camera (32/64/64 channels, 8/4/3 kernels, 4/2/1 strides, 256-d embedding) → fusion MLP `[512, 256]`. Separate encoders per head (actor, each Q, V). |
 | **Batch** | 256 transitions |
 | **Budget** | 150,000 gradient steps (~19 passes over the data) |
@@ -61,7 +61,7 @@ precomputed subset *and* its successor row has to be gathered at `+stride`, whic
 
 Useful overrides: `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,noisy_v3c]`,
 `data.proportions=[...]`, `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]`
-(the deployable cameras+proprio variant; `belt` — the bowl's pose — is the one further group a real cell
+(the deployable image+proprio variant; `belt` — the bowl's pose — is the one further group a real cell
 might supply from a belt encoder), `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
 IQL's `loss.expectile=` / `loss.temperature=` / `loss.gamma=` / `loss.target_tau=`, `run.name=`,
 `logger.backend=null`. Stop a run cleanly (final checkpoint + evaluation) with
@@ -94,18 +94,18 @@ Rows are grouped by the demonstration data they were trained on.
 
 Teacher (privileged state, cameras off, same evaluation protocol): **0.984** success.
 
-![Offline-RL students on deployable observations, by demonstration data](../../docs/experiments/offline_rl/success_rate_by_data.png)
+![Offline-RL students on deployable observations (image / image+proprio), by demonstration data](../../docs/experiments/offline_rl/success_rate_by_data.png)
 
-### Deployable — cameras only; cameras + proprioception
+### Deployable — image only; image + proprioception
 
 | Algorithm | Run | Inputs | Data | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|---|---|
-| BC | `students/bc_expert_medium_v1` | cameras | expert+medium | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
-| IQL | `students/iql_expert_medium_v1` | cameras | expert+medium | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
-| BC | `students/bc_expert_only` | cameras | expert-only | 0.820 @ 130 k | 0.820 | 0.777 | 0.52 h | [wj4kg3hy](https://wandb.ai/sebastian-dittert/food_robot/runs/wj4kg3hy) |
-| IQL | `students/iql_expert_only` | cameras | expert-only | 0.813 @ 90 k | 0.797 | 0.748 | 1.82 h | [d2ia8nor](https://wandb.ai/sebastian-dittert/food_robot/runs/d2ia8nor) |
-| BC | `students/bc_expert_only_proprio` | cameras+proprio | expert-only | **0.984 @ 100 k** | 0.953 | **0.955** | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
-| IQL | `students/iql_expert_only_proprio` | cameras+proprio | expert-only | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
+| BC | `students/bc_expert_medium_v1` | image | expert+medium | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
+| IQL | `students/iql_expert_medium_v1` | image | expert+medium | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
+| BC | `students/bc_expert_only` | image | expert-only | 0.820 @ 130 k | 0.820 | 0.777 | 0.52 h | [wj4kg3hy](https://wandb.ai/sebastian-dittert/food_robot/runs/wj4kg3hy) |
+| IQL | `students/iql_expert_only` | image | expert-only | 0.813 @ 90 k | 0.797 | 0.748 | 1.82 h | [d2ia8nor](https://wandb.ai/sebastian-dittert/food_robot/runs/d2ia8nor) |
+| BC | `students/bc_expert_only_proprio` | image+proprio | expert-only | **0.984 @ 100 k** | 0.953 | **0.955** | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
+| IQL | `students/iql_expert_only_proprio` | image+proprio | expert-only | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
 | CQL | *planned* | | | | | | | |
 | TD3+BC | *planned* | | | | | | | |
 
@@ -114,12 +114,12 @@ Success rate per evaluation, 128 episodes each (binomial standard error around 0
 
 | Gradient steps (k) | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 | 130 | 140 | 150 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| BC, cameras, expert+medium | .05 | .44 | .45 | .57 | .43 | .58 | .65 | **.76** | .47 | .63 | .66 | .57 | .60 | .41 | .50 |
-| IQL, cameras, expert+medium | .16 | .34 | .30 | .63 | .45 | .44 | .59 | **.73** | .45 | .59 | .66 | .63 | .55 | .62 | .62 |
-| BC, cameras+proprio, expert-only | .86 | .95 | .93 | .95 | .93 | .98 | .97 | .85 | .95 | **.98** | .96 | .97 | .95 | .94 | .95 |
-| IQL, cameras+proprio, expert-only | .85 | .88 | .88 | .93 | .94 | .97 | **.98** | .97 | .95 | .98 | .98 | .97 | **.99** | .81 | .96 |
+| BC, image, expert+medium | .05 | .44 | .45 | .57 | .43 | .58 | .65 | **.76** | .47 | .63 | .66 | .57 | .60 | .41 | .50 |
+| IQL, image, expert+medium | .16 | .34 | .30 | .63 | .45 | .44 | .59 | **.73** | .45 | .59 | .66 | .63 | .55 | .62 | .62 |
+| BC, image+proprio, expert-only | .86 | .95 | .93 | .95 | .93 | .98 | .97 | .85 | .95 | **.98** | .96 | .97 | .95 | .94 | .95 |
+| IQL, image+proprio, expert-only | .85 | .88 | .88 | .93 | .94 | .97 | **.98** | .97 | .95 | .98 | .98 | .97 | **.99** | .81 | .96 |
 
-**Reading the original two baselines (cameras only, expert+medium).** Both curves climb fast to ~0.45 by
+**Reading the original two baselines (image only, expert+medium).** Both curves climb fast to ~0.45 by
 30-40 k and then oscillate in a 0.4-0.76 band with no further trend — flat from roughly 60 k on, so the
 150 k budget is already past the point of return. The swings are much larger than evaluation noise (±0.04),
 so they are real policy changes from step to step, not sampling error: with a state-independent scale that
@@ -131,8 +131,8 @@ tier reaches roughly **three quarters of the teacher's 0.984 at its best checkpo
 average**, which is the cost of removing proprioception (and, in that ablation, privileged state too — see
 below for separating the two).
 
-**Reading the cameras+proprio runs.** Both land in a tight 0.81-0.99 band from 10 k on — far tighter than
-the cameras-only runs' 0.05-0.76 swing — and both cross the teacher's 0.984 at least once (BC at 100 k, IQL
+**Reading the image+proprio runs.** Both land in a tight 0.81-0.99 band from 10 k on — far tighter than
+the image-only runs' 0.05-0.76 swing — and both cross the teacher's 0.984 at least once (BC at 100 k, IQL
 at 70 k, 110 k and 130 k). IQL's one bad point (0.805 @ 140 k) is a single-step dip, not a trend: its
 surrounding evaluations are 0.992 and 0.961. Proprioception does not just raise the ceiling, it removes most
 of the camera-only oscillation — plausible, since the student no longer has to infer joint/gripper state
@@ -143,39 +143,39 @@ from the wrist camera before it can even attempt the grasp.
 per point or use more evaluation envs so the selection is not chasing noise; add the `noisy_v3c` tier for
 state coverage; and give the actor a learned, state-dependent scale so it can stay stochastic where the data
 is ambiguous. CQL and TD3+BC come next and inherit this protocol unchanged — run them with the
-cameras+proprio inputs, since that is now the group worth shipping.
+image+proprio inputs, since that is now the group worth shipping.
 
 ### Borderline — not run, flagged for a future variant
 
 Nothing has been trained in this group yet. `belt` (the bowl's pose on the conveyor) is stored as
 simulator-only state in this dataset, but in a real cell it could plausibly come from a belt encoder or a
-fixed overhead camera rather than from privileged simulator state. `cameras + proprio + belt` would
+fixed overhead camera rather than from privileged simulator state. `image + proprio + belt` would
 therefore be a legitimate deployable variant to try next — unlike `privileged` (food pose, orientation,
 grasp flag), which has no real-robot equivalent and is out of scope here.
 
 ## Headline: how much of the gap to the teacher is closed, and by what
 
-The best **deployable** student, `iql_expert_only_proprio` (cameras+proprio, expert-only data), reaches
+The best **deployable** student, `iql_expert_only_proprio` (image+proprio, expert-only data), reaches
 **0.992 at its best checkpoint — slightly above the teacher's own 0.984** — and `bc_expert_only_proprio`
 reaches **0.984**, an exact match. On the more conservative final-checkpoint and last-5-mean metrics both
 land at 0.94-0.96, a few points under the teacher, which given the ±0.15 step-to-step swings this protocol
 already shows (see above) is noise, not a systematic shortfall.
 
 What closed the camera-only gap, data held fixed at expert-only (the best tier — see the data-quality
-ablation below): **cameras-only → cameras+proprio** takes BC's best checkpoint from 0.820 to 0.984, closing
+ablation below): **image-only → image+proprio** takes BC's best checkpoint from 0.820 to 0.984, closing
 **100%** of its 0.164-point gap to the teacher, and IQL's from 0.813 to 0.992, closing its 0.171-point gap
 **and overshooting by 0.008**. Adding only what a real robot's own controller already knows — joint, gripper
 and end-effector state — is enough on its own to match the privileged-state teacher. Once the student can
-feel where its own joints and gripper are, the cameras only have to supply what they are good at: where the
+feel where its own joints and gripper are, the image only have to supply what they are good at: where the
 food and the bowl are. The teacher's 0.984 is not, in practice, out of reach for a policy that sees only what
 a real robot controller could give it.
 
 ## Ablations: data quality and observation access
 
-Two ablations on top of the two cameras-only baselines above, same protocol (150 k steps, batch 256, eval
-every 10 k over 128 envs, same seed): **data quality** — cameras-only inputs, `expert_v3c` alone (1 M frames)
-instead of expert+medium — and **observation access** — expert-only data, inputs extended from cameras-only
-to cameras + `proprio`.
+Two ablations on top of the two image-only baselines above, same protocol (150 k steps, batch 256, eval
+every 10 k over 128 envs, same seed): **data quality** — image-only inputs, `expert_v3c` alone (1 M frames)
+instead of expert+medium — and **observation access** — expert-only data, inputs extended from image-only
+to image + `proprio`.
 
 ### Data quality: does the medium tier help?
 
@@ -205,23 +205,23 @@ seems to cost both algorithms rather than help either.
 
 **Read against the teacher.** Expert-only best checkpoints reach ~81-83% of the teacher's 0.984 (0.820/0.984,
 0.813/0.984) — noticeably closer than the expert+medium runs' ~75%. Since the *inputs* did not change (still
-cameras only), this gap between the two data tiers is entirely a data-quality effect, not an observation
+image only), this gap between the two data tiers is entirely a data-quality effect, not an observation
 one; see below for how much of the *remaining* ~17-19 points is the camera-only bottleneck rather than the
 algorithm.
 
 ### Observation access: how much of the gap is the camera bottleneck?
 
-Same `expert_v3c` data as the expert-only baselines, but `network.in_keys` extended from cameras-only to
+Same `expert_v3c` data as the expert-only baselines, but `network.in_keys` extended from image-only to
 `[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]` via `pickplace.keys.expand_in_keys`. `proprio` is the
 robot's own state — joint positions and velocities, gripper opening, end-effector pose, last action — which
 any real controller publishes, so this stays deployable.
 
 | Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|
-| BC | `students/bc_expert_only_proprio` (cameras+proprio) | **0.984 @ 100 k** | 0.953 | 0.955 | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
-| IQL | `students/iql_expert_only_proprio` (cameras+proprio) | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
+| BC | `students/bc_expert_only_proprio` (image+proprio) | **0.984 @ 100 k** | 0.953 | 0.955 | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
+| IQL | `students/iql_expert_only_proprio` (image+proprio) | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
 
-**Proprioception, not the cameras, was the bottleneck.** On the same expert-only data, adding the robot's own
+**Proprioception, not the images, was the bottleneck.** On the same expert-only data, adding the robot's own
 state takes BC from 0.820 to 0.984 and IQL from 0.813 to 0.992 — the whole gap to the teacher, and the curves
 also stop swinging (last-5 mean 0.955/0.942 versus 0.777/0.748). A camera-only policy has to infer its own
 arm and gripper configuration from pixels, mostly from the wrist view, and that inference is what it was

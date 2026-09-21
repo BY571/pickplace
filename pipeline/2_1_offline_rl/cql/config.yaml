@@ -59,15 +59,19 @@ optim:
 loss:                     # TorchRL sota-implementations/cql/offline_config.yaml unless noted
   gamma: 0.99
   temperature: 1.0        # the softmax temperature of the conservative log-sum-exp over actions
-  min_q_weight: 1.0       # weight of the conservative penalty (the Lagrange dual scales it further)
+  min_q_weight: 0.1       # weight of the conservative penalty. sota: 1.0 under the Lagrange dual;
+                          # measured here at 10 k steps, loss_cql reaches -25,000 at 5.0, -1,300 at
+                          # 1.0 and stays in [-4, 1] at 0.1.
   num_random: 2           # sota: 10. The penalty re-encodes 3*num_random*batch camera images through both
                           # Q nets every step, so with a CNN per camera this one number sets the wall
                           # clock: measured 8.4 / 5.2 / ~2.4 gradient steps per second at num_random
                           # 2 / 4 / 10, i.e. 3.3 h / 5.3 h / ~11.5 h per 100 k-step run (../README.md).
   max_q_backup: false
   deterministic_backup: false
-  with_lagrange: true     # learn the penalty weight against lagrange_thresh instead of fixing min_q_weight
-  lagrange_thresh: 5.0
+  with_lagrange: false    # sota: true, with lagrange_thresh 5.0. The dual did not regulate the penalty
+  lagrange_thresh: 5.0    # here: the critic ran away to Q ~ -14,000 within 10 k steps. A fixed, small
+                          # weight is the least-divergent configuration found (loss_cql stays in [-4, 1]),
+                          # but CQL still does not learn on this data - see ../README.md.
   loss_function: smooth_l1  # as IQL: l2 needs ~10x the gradient norm for the same fit here
   target_tau: 0.005       # SoftUpdate on the Q targets (sota: polyak 0.995)
   actor_scale_lb: 0.1     # floor on the actor's state-independent scale, as sota `model.scale_lb: 0.1`.

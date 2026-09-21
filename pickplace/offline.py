@@ -353,6 +353,23 @@ def make_actor(shapes, obs_keys, action_dim: int, network_cfg, device) -> Probab
     return actor.to(device)
 
 
+def make_deterministic_actor(shapes, obs_keys, action_dim: int, network_cfg, device):
+    """The same body as ``make_actor`` with a tanh head instead of a distribution: s -> a in [-1, 1].
+
+    TD3+BC is a deterministic-policy algorithm: ``TD3BCLoss`` reads ``action`` straight out of the actor
+    (and adds the target-policy smoothing noise itself), so it cannot take the stochastic ``make_actor``.
+    Construction follows TorchRL's ``sota-implementations/td3_bc/utils.py`` (module -> ``TanhModule``);
+    only the body differs, and it is the same ``PixelNet`` every other algorithm here uses.
+    """
+    from tensordict.nn import TensorDictSequential
+    from torchrl.modules import TanhModule
+
+    body = PixelNet(shapes, network_cfg, action_dim, out_gain=0.01)
+    module = TensorDictModule(body, in_keys=[as_key(k) for k in obs_keys], out_keys=["param"])
+    tanh = TanhModule(in_keys=["param"], out_keys=["action"], low=-1.0, high=1.0)
+    return TensorDictSequential(module, tanh).to(device)
+
+
 def make_qvalue(shapes, obs_keys, action_dim: int, network_cfg, device) -> TensorDictModule:
     """Q(s, a): the observation encoders plus the raw action, concatenated into the fusion MLP."""
     body = PixelNet(shapes, network_cfg, 1, out_gain=1.0, extra_dim=action_dim)

@@ -1,5 +1,6 @@
 """The transition index is the piece most likely to be silently wrong, so it is tested exhaustively."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -260,3 +261,81 @@ def test_pixelnet_forward_with_extra_raw_vector_for_a_qvalue_head():
     net = PixelNet([(8, 8, 3), (4,)], _network_cfg(), out_dim=1, out_gain=1.0, extra_dim=7)
     out = net(torch.randint(0, 256, (2, 8, 8, 3), dtype=torch.uint8), torch.randn(2, 4), torch.randn(2, 7))
     assert out.shape == (2, 1)
+
+
+# --------------------------------------------------------------------------------------------------
+# Every algorithm's make_algo builds from its real config.yaml and takes gradient steps
+# --------------------------------------------------------------------------------------------------
+
+OFFLINE_DIR = Path(__file__).resolve().parents[2] / "pipeline" / "2_1_offline_rl"
+ALGORITHMS = ("bc", "cql", "iql", "td3_bc")
+# One camera and one vector group, both tiny: this asserts the loss wiring, not what is learned.
+ALGO_SHAPES, ACTION_DIM = ((8, 8, 3), (4,)), 3
+ALGO_KEYS = (("pixels", "wrist_rgb"), ("proprio",))
+EXPECTED_LOSSES = {
+    "bc": {"loss_bc"},
+    "cql": {"loss_actor", "loss_actor_bc", "loss_qvalue", "loss_cql", "loss_alpha", "loss_alpha_prime"},
+    "iql": {"loss_actor", "loss_qvalue", "loss_value"},
+    "td3_bc": {"loss_qvalue", "loss_actor", "bc_loss", "lmbd"},
+}
+
+
+def _load_algo_module(name):
+    """Load ``<algo>/utils.py`` the way train.py does: by file path, under its own module name."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(f"{name}_utils_test", OFFLINE_DIR / name / "utils.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _algo_cfg(name, **loss_overrides):
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.load(OFFLINE_DIR / name / "config.yaml")
+    cfg.network = OmegaConf.create(vars(_network_cfg()))
+    for key, value in loss_overrides.items():
+        cfg.loss[key] = value
+    return cfg
+
+
+def _algo_batch(batch_size=4):
+    obs = {key: (torch.randint(0, 256, (batch_size, *shape), dtype=torch.uint8) if len(shape) == 3
+                 else torch.randn(batch_size, *shape))
+           for key, shape in zip(ALGO_KEYS, ALGO_SHAPES)}
+    flag = torch.zeros(batch_size, 1, dtype=torch.bool)
+    flag[0] = True  # one terminal pair, so the masked bootstrap is exercised too
+    return TensorDict(
+        {**obs, "action": torch.rand(batch_size, ACTION_DIM) * 1.8 - 0.9,
+         "next": TensorDict({**obs, "reward": torch.randn(batch_size, 1),
+                             "terminated": flag, "done": flag.clone()}, batch_size=[batch_size])},
+        batch_size=[batch_size],
+    )
+
+
+@pytest.mark.parametrize("name", ALGORITHMS)
+def test_make_algo_takes_gradient_steps_and_reports_its_losses(name):
+    # CQL's actor warm-up ends after 2 steps, TD3+BC's actor updates on step 2: 3 steps cover both branches.
+    overrides = {"policy_eval_start": 2} if name == "cql" else {}
+    cfg = _algo_cfg(name, **overrides)
+    algo = _load_algo_module(name).make_algo(cfg, ALGO_SHAPES, ALGO_KEYS, ACTION_DIM, torch.device("cpu"))
+    before = [p.detach().clone() for p in algo.policy.parameters()]
+
+    for _ in range(3):
+        losses = algo.update(_algo_batch())
+
+    assert EXPECTED_LOSSES[name] <= set(losses), (name, sorted(losses))
+    assert all(torch.isfinite(torch.as_tensor(v)).all() for v in losses.values()), losses
+    assert any(not torch.equal(b, p.detach()) for b, p in zip(before, algo.policy.parameters())), name
+    assert "actor" in algo.state_dict()
+
+
+def test_the_deterministic_actor_maps_observations_into_the_action_bounds():
+    from pickplace.offline import make_deterministic_actor
+
+    actor = make_deterministic_actor(ALGO_SHAPES, ALGO_KEYS, ACTION_DIM, _network_cfg(), torch.device("cpu"))
+    out = actor(_algo_batch(batch_size=5))
+    action = out.get("action")
+    assert action.shape == (5, ACTION_DIM)
+    assert action.abs().max() <= 1.0

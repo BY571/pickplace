@@ -1,0 +1,73 @@
+# Stage 2.1 — TD3+BC on the camera shards.
+# Everything above `optim` is the shared comparison protocol: it must stay identical across the algorithms
+# in this folder (tests/unit/test_offline_configs.py asserts that). Only `optim`/`loss` differ.
+
+device: cuda:0
+seed: 0
+matmul_precision: high
+
+data:
+  shards: [expert_v3c, medium_v3c]   # names resolve under $FOOD_ROBOT_ARTIFACTS/shards
+  proportions: [0.5, 0.5]            # rows per batch drawn from each shard
+  include_terminals: true            # keep terminated rows as masked-bootstrap pairs (the success bonus)
+
+batch_size: 256
+gradient_steps: 150_000
+max_hours: null                      # stop cleanly (final checkpoint + eval) after this much wall time
+reward_scale: 0.1                    # applied to the sampled reward before the loss (BC ignores the reward)
+log_interval: 200                    # gradient steps per METRICS line
+prefetch_depth: 6                    # batches read ahead from the memmaps by background threads
+prefetch_workers: 3
+
+network:                             # one Nature-CNN per camera (+ an MLP branch for any vector groups)
+  in_keys:                           # groups/leaf keys (pickplace.keys.expand_in_keys); default: cameras only
+    - [pixels, overview_rgb]         # so the student must infer arm/gripper state from pixels
+    - [pixels, wrist_rgb]
+  cnn_channels: [32, 64, 64]
+  cnn_kernels: [8, 4, 3]
+  cnn_strides: [4, 2, 1]
+  image_embed: 256
+  proprio_embed: 128                 # vector-branch width; unused while in_keys is cameras-only
+  fusion: [512, 256]
+
+eval:
+  interval: 10_000                   # gradient steps between online evaluations (0 disables, cameras off)
+  num_envs: 128
+  image_size: 84
+  seed: 0
+
+checkpoint:
+  interval: 50_000                   # gradient steps; each checkpoint carries its own online evaluation
+
+app:
+  headless: true
+
+run:
+  dir: null                          # null: $FOOD_ROBOT_ARTIFACTS/students/<name>
+  name: null                         # null: bc_<UTC timestamp>
+
+logger:
+  backend: wandb                     # wandb | csv | tensorboard | null
+  project_name: food_robot
+  group: offline_rl
+  exp_name: td3_bc
+
+optim:
+  lr: 3.0e-4
+  max_grad_norm: 10.0     # as BC/IQL: one clip value across the algorithms, only outliers are clipped
+
+loss:                     # TorchRL sota-implementations/td3_bc/config.yaml unless noted
+  gamma: 0.99
+  alpha: 2.5              # Q-vs-BC balance; the loss rescales the Q term by alpha / mean|Q|
+  policy_noise: 0.2       # std of the target-policy smoothing noise
+  noise_clip: 0.5         # that noise is clipped to +-this
+  policy_update_delay: 2  # gradient steps per actor update (and per target update)
+  num_qvalue_nets: 2
+  loss_function: smooth_l1  # as IQL: l2 needs ~10x the gradient norm for the same fit here
+  target_tau: 0.005       # SoftUpdate on the actor and Q targets (sota: polyak 0.995)
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: outputs/offline_td3_bc/${now:%Y-%m-%d_%H-%M-%S}

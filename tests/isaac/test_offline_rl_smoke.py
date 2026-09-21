@@ -1,4 +1,4 @@
-"""Both offline trainers really train, evaluate online and write checkpoints with eval-bearing manifests.
+"""Every offline trainer really trains, evaluates online and writes checkpoints with eval-bearing manifests.
 
 The shards are tiny synthetic ones (random images): this asserts the pipeline, not what is learned. Their
 manifest carries a fast-belt env config, so the online evaluation's ``max_episode_length`` is short.
@@ -91,8 +91,12 @@ def _train(algorithm: str, tmp_path: Path, *overrides, timeout=2400):
     return proc, proc.stdout[-4000:] + proc.stderr[-4000:]
 
 
-@pytest.mark.parametrize(("algorithm", "losses"), [("bc", ["train/loss_bc"]),
-                                                   ("iql", ["train/loss_actor", "train/loss_qvalue", "train/loss_value"])])
+@pytest.mark.parametrize(("algorithm", "losses"), [
+    ("bc", ["train/loss_bc"]),
+    ("iql", ["train/loss_actor", "train/loss_qvalue", "train/loss_value"]),
+    ("cql", ["train/loss_actor", "train/loss_qvalue", "train/loss_cql", "train/loss_alpha"]),
+    ("td3_bc", ["train/loss_actor", "train/loss_qvalue", "train/bc_loss"]),
+])
 def test_offline_trainer_trains_evaluates_and_checkpoints(algorithm, losses, tmp_path):
     proc, tail = _train(algorithm, tmp_path)
     assert f"{algorithm.upper()}_DONE" in proc.stdout, tail

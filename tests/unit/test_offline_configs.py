@@ -17,8 +17,8 @@ def _config(name: str) -> dict:
     return yaml.safe_load((OFFLINE_DIR / name / "config.yaml").read_text())
 
 
-def test_both_algorithms_exist():
-    assert ALGORITHMS == ["bc", "iql"]
+def test_all_four_algorithms_exist():
+    assert ALGORITHMS == ["bc", "cql", "iql", "td3_bc"]
 
 
 @pytest.mark.parametrize("key", SHARED_KEYS)

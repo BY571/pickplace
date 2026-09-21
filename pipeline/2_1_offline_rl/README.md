@@ -198,10 +198,12 @@ good and bad demonstrations better than plain cloning, tolerating (or even benef
 tier that BC just imitates blindly. That is not what happens here: on every metric IQL's improvement from
 removing `medium_v3c` is at least as large as BC's, in relative terms comparable (best: +12% vs +8%; final:
 +29% vs +64%, though BC's baseline final of 0.500 was an anomalous late-training collapse rather than a
-stable number, so that particular ratio overstates BC's gain). The `medium_v3c` tier is teacher rollouts with
-Gaussian action noise added, not a distinct suboptimal *policy* — it does not give IQL new strategies to
-reweight toward, only noisier transitions and a lower average return to estimate advantages against, which
-seems to cost both algorithms rather than help either.
+stable number, so that particular ratio overstates BC's gain). `medium_v3c` is a genuinely weaker *policy*, not noise: an
+earlier checkpoint of the same teacher run (`ppo_teacher_110100480`, 65% success, zero action noise). It is
+still the same training run, so it fails in the same ways the expert occasionally does rather than
+demonstrating different behaviour, and it gives both algorithms lower-return transitions to estimate
+advantages against. Whether IQL can exploit a *differently* suboptimal source (a beginner policy, or a
+scripted one) is untested here.
 
 **Read against the teacher.** Expert-only best checkpoints reach ~81-83% of the teacher's 0.984 (0.820/0.984,
 0.813/0.984) — noticeably closer than the expert+medium runs' ~75%. Since the *inputs* did not change (still

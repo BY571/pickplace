@@ -118,6 +118,58 @@ or use more evaluation envs so the selection is not chasing noise; add the `nois
 coverage; and give the actor a learned, state-dependent scale so it can stay stochastic where the data is
 ambiguous. CQL and TD3+BC come next and inherit this protocol unchanged.
 
+## Ablations: data quality and observation access
+
+Two ablations on top of the two baselines above, same protocol (150 k steps, batch 256, eval every 10 k over
+128 envs, same seed): **data quality** — cameras-only inputs, `expert_v3c` alone (1 M frames) instead of
+expert+medium — and **observation access** — expert+medium data, but `network.in_keys` extended to
+`pixels + proprio + belt + privileged`, i.e. everything the teacher itself saw. The second one is a ceiling
+this dataset supports, not a deployable policy (a real deployment has no privileged state), so read it as
+"how much of the gap is the camera bottleneck" rather than as a candidate for shipping.
+
+### Data quality: does the medium tier help?
+
+| Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
+|---|---|---|---|---|---|---|
+| BC | `students/bc_expert_medium_v1` (expert+medium) | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
+| BC | `students/bc_expert_only` (expert-only) | **0.820 @ 130 k** | **0.820** | **0.777** | 0.52 h | [wj4kg3hy](https://wandb.ai/sebastian-dittert/food_robot/runs/wj4kg3hy) |
+| IQL | `students/iql_expert_medium_v1` (expert+medium) | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
+| IQL | `students/iql_expert_only` (expert-only) | **0.813 @ 90 k** | **0.797** | **0.748** | 1.82 h | [d2ia8nor](https://wandb.ai/sebastian-dittert/food_robot/runs/d2ia8nor) |
+
+![Data-quality ablation: expert-only vs expert+medium](../../docs/experiments/offline_rl/data_quality.png)
+
+**The medium tier hurts, for both algorithms.** Dropping it raises BC's best checkpoint by 6 points (0.758 →
+0.820) and, far more strikingly, its final-checkpoint stability: final success goes from 0.500 (BC's
+collapsed, worst-since-30k state at 150 k on the mixed data) to 0.820 — the same as its best. Last-five-eval
+mean rises from 0.548 to 0.777. IQL improves by a similar or larger margin on every metric: best +0.086
+(0.727 → 0.813), final +0.180 (0.617 → 0.797), last-five mean +0.134 (0.614 → 0.748).
+
+**IQL does not show the theoretically-expected benefit from mixed-quality data.** IQL's whole pitch —
+expectile value estimation plus advantage-weighted policy extraction — is supposed to let it exploit a mix of
+good and bad demonstrations better than plain cloning, tolerating (or even benefiting from) the lower-quality
+tier that BC just imitates blindly. That is not what happens here: on every metric IQL's improvement from
+removing `medium_v3c` is at least as large as BC's, in relative terms comparable (best: +12% vs +8%; final:
++29% vs +64%, though BC's baseline final of 0.500 was an anomalous late-training collapse rather than a
+stable number, so that particular ratio overstates BC's gain). The `medium_v3c` tier is teacher rollouts with
+Gaussian action noise added, not a distinct suboptimal *policy* — it does not give IQL new strategies to
+reweight toward, only noisier transitions and a lower average return to estimate advantages against, which
+seems to cost both algorithms rather than help either.
+
+**Read against the teacher.** Expert-only best checkpoints reach ~81-83% of the teacher's 0.984 (0.820/0.984,
+0.813/0.984) — noticeably closer than the expert+medium runs' ~75%. Since the *inputs* did not change (still
+cameras only), this gap between the two data tiers is entirely a data-quality effect, not an observation
+one; see below for how much of the *remaining* ~17-19 points is the camera-only bottleneck rather than the
+algorithm.
+
+### Observation access: how much of the gap is the camera bottleneck?
+
+| Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
+|---|---|---|---|---|---|---|
+| BC | `students/bc_full_access` (pixels+proprio+belt+privileged) | *pending* | | | | |
+| IQL | `students/iql_full_access` (pixels+proprio+belt+privileged) | *pending* | | | | |
+
+*(filled in once both full-access runs finish; see the ablations report for the final table and interpretation.)*
+
 ## Adding an algorithm
 
 Create `pipeline/2_1_offline_rl/<algo>/{train.py,utils.py,config.yaml}`:

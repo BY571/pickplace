@@ -274,7 +274,8 @@ ALGO_SHAPES, ACTION_DIM = ((8, 8, 3), (4,)), 3
 ALGO_KEYS = (("pixels", "wrist_rgb"), ("proprio",))
 EXPECTED_LOSSES = {
     "bc": {"loss_bc"},
-    "cql": {"loss_actor", "loss_actor_bc", "loss_qvalue", "loss_cql", "loss_alpha", "loss_alpha_prime"},
+    # loss_alpha_prime only exists under the Lagrange variant, which this setting does not use.
+    "cql": {"loss_actor", "loss_actor_bc", "loss_qvalue", "loss_cql", "loss_alpha"},
     "iql": {"loss_actor", "loss_qvalue", "loss_value"},
     "td3_bc": {"loss_qvalue", "loss_actor", "bc_loss", "lmbd"},
 }

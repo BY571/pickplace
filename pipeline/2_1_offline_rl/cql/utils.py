@@ -76,7 +76,8 @@ class CQL:
 def make_algo(cfg, obs_shapes, obs_keys, action_dim, device):
     aliases = _flat_aliases(obs_keys)
     flat_keys = aliases.out_keys
-    actor = make_actor(obs_shapes, flat_keys, action_dim, cfg.network, device)
+    actor = make_actor(obs_shapes, flat_keys, action_dim, cfg.network, device,
+                       scale_lb=float(cfg.loss.actor_scale_lb))
     qvalue = make_qvalue(obs_shapes, flat_keys, action_dim, cfg.network, device)
     loss_module = CQLLoss(
         actor,

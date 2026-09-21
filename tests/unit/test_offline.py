@@ -360,3 +360,18 @@ def test_only_td3_bc_gets_a_deterministic_actor():
                         ("iql", algos["iql"].loss_module.actor_network),
                         ("cql", algos["cql"].loss_module.actor_network)):
         assert hasattr(actor, "get_dist"), f"{name} extracts its policy from a distribution"
+
+
+def test_the_actor_scale_floor_is_honoured():
+    """CQL learns a SAC entropy temperature against ``target_entropy = -action_dim``; without a floor the
+    cloned scale collapses far below it and the temperature diverges. The floor must actually bind."""
+    from pickplace.offline import make_actor
+
+    batch = _algo_batch(batch_size=6).select(*ALGO_KEYS)
+    free = make_actor(ALGO_SHAPES, ALGO_KEYS, ACTION_DIM, _network_cfg(), torch.device("cpu"))
+    floored = make_actor(ALGO_SHAPES, ALGO_KEYS, ACTION_DIM, _network_cfg(), torch.device("cpu"), scale_lb=0.1)
+    with torch.no_grad():
+        for net in (free, floored):
+            net.module[0].module.scale.state_independent_scale.fill_(-20.0)  # ask for a collapsed scale
+        assert free.get_dist(batch.clone()).scale.max() < 0.1
+        assert floored.get_dist(batch.clone()).scale.min() >= 0.1

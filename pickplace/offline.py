@@ -321,19 +321,27 @@ class PixelNet(nn.Module):
 class _ActorNet(nn.Module):
     """PixelNet -> (loc, state-independent scale); several positional inputs, unlike nn.Sequential."""
 
-    def __init__(self, body: PixelNet, action_dim: int):
+    def __init__(self, body: PixelNet, action_dim: int, scale_lb: float = 1e-4):
         super().__init__()
         self.body = body
-        self.scale = AddStateIndependentNormalScale(action_dim, scale_lb=1e-4)
+        self.scale = AddStateIndependentNormalScale(action_dim, scale_lb=scale_lb)
 
     def forward(self, *xs: torch.Tensor):
         return self.scale(self.body(*xs))
 
 
-def make_actor(shapes, obs_keys, action_dim: int, network_cfg, device) -> ProbabilisticActor:
-    """TanhNormal actor on [-1, 1] with a state-independent scale (as in the teacher and pixel PPO)."""
+def make_actor(shapes, obs_keys, action_dim: int, network_cfg, device,
+               scale_lb: float = 1e-4) -> ProbabilisticActor:
+    """TanhNormal actor on [-1, 1] with a state-independent scale (as in the teacher and pixel PPO).
+
+    ``scale_lb`` floors that scale. The default lets it collapse, which is what cloning a near-deterministic
+    teacher wants; an algorithm with a learned SAC entropy temperature needs a floor instead, or the
+    policy's entropy falls below ``target_entropy`` and the temperature diverges (TorchRL's CQL sota sets
+    ``model.scale_lb: 0.1`` for exactly this reason). The floor never changes the *evaluated* action, which
+    is the distribution's mode.
+    """
     body = PixelNet(shapes, network_cfg, action_dim, out_gain=0.01)
-    module = TensorDictModule(_ActorNet(body, action_dim), in_keys=[as_key(k) for k in obs_keys],
+    module = TensorDictModule(_ActorNet(body, action_dim, scale_lb), in_keys=[as_key(k) for k in obs_keys],
                               out_keys=["loc", "scale"])
     from torchrl.envs import ExplorationType
 

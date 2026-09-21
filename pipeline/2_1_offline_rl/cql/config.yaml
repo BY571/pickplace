@@ -70,6 +70,12 @@ loss:                     # TorchRL sota-implementations/cql/offline_config.yaml
   lagrange_thresh: 5.0
   loss_function: smooth_l1  # as IQL: l2 needs ~10x the gradient norm for the same fit here
   target_tau: 0.005       # SoftUpdate on the Q targets (sota: polyak 0.995)
+  actor_scale_lb: 0.1     # floor on the actor's state-independent scale, as sota `model.scale_lb: 0.1`.
+                          # Our shared default (1e-4) lets the scale collapse while cloning, which drops
+                          # the policy's entropy below target_entropy = -action_dim; the learned SAC
+                          # temperature then diverges (measured: alpha 0.73 -> 9.6 between 14 k and 23 k
+                          # steps) and the actor is driven to maximum entropy. The floor never changes the
+                          # evaluated action, which is the distribution's mode.
   policy_eval_start: 4_000  # steps of behaviour cloning before the actor starts chasing Q; sota: 40 k of
                             # 1 M gradient steps, i.e. the same 4% of the budget
 

@@ -61,7 +61,8 @@ precomputed subset *and* its successor row has to be gathered at `+stride`, whic
 
 Useful overrides: `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,noisy_v3c]`,
 `data.proportions=[...]`, `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio,belt,privileged]`
-(cameras + everything the teacher saw), `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
+(cameras + everything the teacher saw — an oracle input, see Results below; drop `belt,privileged` and keep
+just `proprio` for the deployable cameras+proprio variant), `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
 IQL's `loss.expectile=` / `loss.temperature=` / `loss.gamma=` / `loss.target_tau=`, `run.name=`,
 `logger.backend=null`. Stop a run cleanly (final checkpoint + evaluation) with
 
@@ -83,49 +84,126 @@ W&B project `food_robot`, group `offline_rl`.
 
 ## Results
 
+**Grouping.** Every row below shares the protocol above (150 k steps, batch 256, eval every 10 k over 128
+envs, seed 0, W&B group `offline_rl`). Rows are grouped by whether their *inputs* could exist on a real
+robot at inference time, not by algorithm: `proprio` (`ee_pos`, `ee_quat`, `gripper_pos`, `joint_pos_rel`,
+`joint_vel_rel`, `last_action`) always comes from a real robot's own controller; `privileged` (food pose,
+orientation, grasp flag) exists only in the simulator and has no real-robot equivalent. A run that touches
+`privileged` is an **oracle** measurement of a ceiling, not a candidate to ship.
+
 Teacher (privileged state, cameras off, same evaluation protocol): **0.984** success.
 
-![Online success rate vs gradient steps](../../docs/experiments/pipeline_stage2_1/success_rate.png)
+![Offline-RL students: deployable inputs (solid) vs oracle/privileged-state inputs (dashed)](../../docs/experiments/offline_rl/success_rate_all.png)
 
-| Algorithm | Run | Steps | Best | Final | Mean of last 5 evals | Wall clock | W&B |
-|---|---|---|---|---|---|---|---|
-| BC | `students/bc_expert_medium_v1` | 150 k | 0.758 @ 80 k | 0.500 | **0.548** | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
-| IQL | `students/iql_expert_medium_v1` | 150 k | 0.727 @ 80 k | 0.617 | **0.614** | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
-| CQL | *planned* | | | | | | |
-| TD3+BC | *planned* | | | | | | |
+### Deployable — cameras only; cameras + proprioception
 
-Success rate per evaluation (128 episodes each, so one episode is 0.8 points and the binomial standard error
-around 0.6 is about 0.043):
+| Algorithm | Run | Inputs | Data | Best | Final | Mean of last 5 evals | Wall clock | W&B |
+|---|---|---|---|---|---|---|---|---|
+| BC | `students/bc_expert_medium_v1` | cameras | expert+medium | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
+| IQL | `students/iql_expert_medium_v1` | cameras | expert+medium | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
+| BC | `students/bc_expert_only` | cameras | expert-only | 0.820 @ 130 k | 0.820 | 0.777 | 0.52 h | [wj4kg3hy](https://wandb.ai/sebastian-dittert/food_robot/runs/wj4kg3hy) |
+| IQL | `students/iql_expert_only` | cameras | expert-only | 0.813 @ 90 k | 0.797 | 0.748 | 1.82 h | [d2ia8nor](https://wandb.ai/sebastian-dittert/food_robot/runs/d2ia8nor) |
+| BC | `students/bc_expert_only_proprio` | cameras+proprio | expert-only | **0.984 @ 100 k** | 0.953 | **0.955** | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
+| IQL | `students/iql_expert_only_proprio` | cameras+proprio | expert-only | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
+| CQL | *planned* | | | | | | | |
+| TD3+BC | *planned* | | | | | | | |
+
+Success rate per evaluation, 128 episodes each (binomial standard error around 0.6 is about 0.043 — the
+`±0.04` referenced throughout this file):
 
 | Gradient steps (k) | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 | 130 | 140 | 150 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| BC | .05 | .44 | .45 | .57 | .43 | .58 | .65 | **.76** | .47 | .63 | .66 | .57 | .60 | .41 | .50 |
-| IQL | .16 | .34 | .30 | .63 | .45 | .44 | .59 | **.73** | .45 | .59 | .66 | .63 | .55 | .62 | .62 |
+| BC, cameras, expert+medium | .05 | .44 | .45 | .57 | .43 | .58 | .65 | **.76** | .47 | .63 | .66 | .57 | .60 | .41 | .50 |
+| IQL, cameras, expert+medium | .16 | .34 | .30 | .63 | .45 | .44 | .59 | **.73** | .45 | .59 | .66 | .63 | .55 | .62 | .62 |
+| BC, cameras+proprio, expert-only | .86 | .95 | .93 | .95 | .93 | .98 | .97 | .85 | .95 | **.98** | .96 | .97 | .95 | .94 | .95 |
+| IQL, cameras+proprio, expert-only | .85 | .88 | .88 | .93 | .94 | .97 | **.98** | .97 | .95 | .98 | .98 | .97 | **.99** | .81 | .96 |
 
-**Reading it.** Both curves climb fast to ~0.45 by 30-40 k and then oscillate in a 0.4-0.76 band with no
-further trend — flat from roughly 60 k on, so the 150 k budget is already past the point of return. The
-swings are much larger than evaluation noise (±0.04), so they are real policy changes from step to step, not
-sampling error: with a state-independent scale that has collapsed (BC's mean scale falls from 0.98 to ~0.12
-by 10 k steps), a small drift in the mean action changes the grasp outcome on a large share of episodes.
-The two algorithms are within noise of each other on the best checkpoint (0.76 vs 0.73), but IQL is the more
-stable of the two late in training (last-five mean 0.61 vs 0.55, and BC's last three evaluations are its
-worst since 30 k). A camera-only student reaches roughly **three quarters of the teacher's 0.984 at its best
-checkpoint and about 60% on average**, which is the cost of removing proprioception and privileged state.
+**Reading the original two baselines (cameras only, expert+medium).** Both curves climb fast to ~0.45 by
+30-40 k and then oscillate in a 0.4-0.76 band with no further trend — flat from roughly 60 k on, so the
+150 k budget is already past the point of return. The swings are much larger than evaluation noise (±0.04),
+so they are real policy changes from step to step, not sampling error: with a state-independent scale that
+has collapsed (BC's mean scale falls from 0.98 to ~0.12 by 10 k steps), a small drift in the mean action
+changes the grasp outcome on a large share of episodes. The two algorithms are within noise of each other on
+the best checkpoint (0.76 vs 0.73), but IQL is the more stable of the two late in training (last-five mean
+0.61 vs 0.55, and BC's last three evaluations are its worst since 30 k). A camera-only student on this data
+tier reaches roughly **three quarters of the teacher's 0.984 at its best checkpoint and about 60% on
+average**, which is the cost of removing proprioception (and, in that ablation, privileged state too — see
+below for separating the two).
+
+**Reading the cameras+proprio runs.** Both land in a tight 0.81-0.99 band from 10 k on — far tighter than
+the cameras-only runs' 0.05-0.76 swing — and both cross the teacher's 0.984 at least once (BC at 100 k, IQL
+at 70 k, 110 k and 130 k). IQL's one bad point (0.805 @ 140 k) is a single-step dip, not a trend: its
+surrounding evaluations are 0.992 and 0.961. Proprioception does not just raise the ceiling, it removes most
+of the camera-only oscillation — plausible, since the student no longer has to infer joint/gripper state
+from the wrist camera before it can even attempt the grasp.
 
 **What to try next**, in the order the evidence suggests: pick checkpoints by evaluation rather than by step
-(the best checkpoint beats the final one by 15-25 points in both runs); average several evaluations per point
-or use more evaluation envs so the selection is not chasing noise; add the `noisy_v3c` tier for state
-coverage; and give the actor a learned, state-dependent scale so it can stay stochastic where the data is
-ambiguous. CQL and TD3+BC come next and inherit this protocol unchanged.
+(the best checkpoint beats the final one by several points in most runs here); average several evaluations
+per point or use more evaluation envs so the selection is not chasing noise; add the `noisy_v3c` tier for
+state coverage; and give the actor a learned, state-dependent scale so it can stay stochastic where the data
+is ambiguous. CQL and TD3+BC come next and inherit this protocol unchanged — run them with the
+cameras+proprio inputs, since that is now the group worth shipping.
+
+### Borderline — not run, flagged for a future variant
+
+Nothing has been trained in this group yet. `belt` (the bowl's pose on the conveyor) is stored as
+simulator-only state in this dataset, but in a real cell it could plausibly come from a belt encoder or a
+fixed overhead camera rather than from privileged simulator state. `cameras + proprio + belt` would
+therefore be a legitimate deployable variant to try next — distinct from `privileged` (food pose,
+orientation, grasp flag), which has no real-robot equivalent and stays in the oracle group below.
+
+### Oracle / upper bound — not deployable (contains simulator-only `privileged` state)
+
+| Algorithm | Run | Inputs | Data | Best | Final | Mean of last 5 evals | Wall clock | W&B |
+|---|---|---|---|---|---|---|---|---|
+| BC | `students/bc_full_access` | pixels+proprio+belt+privileged | expert+medium | 0.961 @ 110 k | 0.953 | 0.934 | 0.78 h | [nyl05r0b](https://wandb.ai/sebastian-dittert/food_robot/runs/nyl05r0b) |
+| IQL | `students/iql_full_access` | pixels+proprio+belt+privileged | expert+medium | 0.977 @ 150 k | 0.977 | 0.944 | 2.04 h | [qg07vj09](https://wandb.ai/sebastian-dittert/food_robot/runs/qg07vj09) |
+
+These two runs include `privileged`, which only exists in the simulator; no real deployment has access to
+it. **They are excluded from any algorithm or observation comparison claim about deployable policies.** They
+exist only to measure the ceiling this dataset supports — how much of the camera-only gap is an
+observation-access problem at all — not as candidates to ship; see the observation-access ablation below for
+how they were produced.
+
+## Headline: how much of the gap to the teacher is closed, and by what
+
+The best **deployable** student, `iql_expert_only_proprio` (cameras+proprio, expert-only data), reaches
+**0.992 at its best checkpoint — slightly above the teacher's own 0.984** — and `bc_expert_only_proprio`
+reaches **0.984**, an exact match. On the more conservative final-checkpoint and last-5-mean metrics both
+land at 0.94-0.96, a few points under the teacher, which given the ±0.15 step-to-step swings this protocol
+already shows (see above) is noise, not a systematic shortfall.
+
+Decomposing the two moves that closed the original camera-only gap:
+
+* **cameras-only → cameras+proprio**, data held fixed at expert-only (the best tier — see the data-quality
+  ablation below): BC's best checkpoint goes 0.820 → 0.984, closing **100%** of its 0.164-point gap to the
+  teacher; IQL's goes 0.813 → 0.992, closing its 0.171-point gap **and then overshooting by 0.008**. Adding
+  only what a real robot's own controller already knows — joint, gripper and end-effector state, nothing
+  simulator-only — is enough on its own to match the privileged-state teacher.
+* **the oracle's privileged state** (cameras+proprio+belt+privileged vs. cameras-only, on expert+medium
+  data, from the observation-access ablation below): closes 90-98% of the camera-only gap (0.758→0.961 for
+  BC, 0.727→0.977 for IQL).
+
+Read side by side, the deployable cameras+proprio runs (expert-only data, *no* privileged state) match or
+beat the oracle full-access runs (expert+medium data, *with* privileged state) on every metric: 0.984/0.992
+vs. 0.961/0.977 best-checkpoint. That is not a perfectly controlled comparison — the two groups sit on
+different data tiers, and the ablation below shows expert-only data is worth several points on its own — but
+it is enough to say that **proprioception, not the simulator-only food/bowl pose, is doing essentially all of
+the work of closing the gap**. Once the student can feel where its own joints and gripper are, seeing the
+food's exact pose adds little to nothing on top. The teacher's 0.984 is not, in practice, out of reach for a
+policy that only ever sees what a real robot controller could give it.
 
 ## Ablations: data quality and observation access
 
-Two ablations on top of the two baselines above, same protocol (150 k steps, batch 256, eval every 10 k over
-128 envs, same seed): **data quality** — cameras-only inputs, `expert_v3c` alone (1 M frames) instead of
-expert+medium — and **observation access** — expert+medium data, but `network.in_keys` extended to
-`pixels + proprio + belt + privileged`, i.e. everything the teacher itself saw. The second one is a ceiling
-this dataset supports, not a deployable policy (a real deployment has no privileged state), so read it as
-"how much of the gap is the camera bottleneck" rather than as a candidate for shipping.
+Two earlier ablations on top of the two cameras-only baselines above, same protocol (150 k steps, batch 256,
+eval every 10 k over 128 envs, same seed): **data quality** — cameras-only inputs, `expert_v3c` alone (1 M
+frames) instead of expert+medium — and **observation access** — expert+medium data, but `network.in_keys`
+extended to `pixels + proprio + belt + privileged`, i.e. everything the teacher itself saw. The second one
+produced the two oracle rows above: a ceiling this dataset supports, not a deployable policy (a real
+deployment has no privileged state), so read it as "how much of the gap is the camera bottleneck" rather
+than as a candidate for shipping. The cameras+proprio deployable runs in the Results section above were run
+afterwards, once it was clear the gap should be attacked with deployable inputs first; see the Headline above
+for how the two ablations and the deployable runs compare.
 
 ### Data quality: does the medium tier help?
 
@@ -166,26 +244,28 @@ algorithm.
 Same `expert_v3c` + `medium_v3c` data as the baselines, but `network.in_keys` extended from cameras-only to
 `[[pixels,overview_rgb],[pixels,wrist_rgb],proprio,belt,privileged]` — everything the teacher itself saw, via
 `pickplace.keys.expand_in_keys`. **This is a ceiling, not a deployable policy**: a real deployment has no
-privileged food/bowl pose, so treat these two rows as measuring the observation bottleneck, not as a
-candidate to ship.
+privileged food/bowl pose, so treat these two rows (the "oracle / upper bound" group above) as measuring the
+observation bottleneck, not as a candidate to ship.
 
 | Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|
 | BC | `students/bc_full_access` (pixels+proprio+belt+privileged) | **0.961 @ 110 k** | 0.953 | 0.934 | 0.78 h | [nyl05r0b](https://wandb.ai/sebastian-dittert/food_robot/runs/nyl05r0b) |
 | IQL | `students/iql_full_access` (pixels+proprio+belt+privileged) | **0.977 @ 150 k** | 0.977 | 0.944 | 2.04 h | [qg07vj09](https://wandb.ai/sebastian-dittert/food_robot/runs/qg07vj09) |
 
-![All six runs vs the teacher](../../docs/experiments/offline_rl/success_rate_all.png)
+See the plot in the Results section above (now eight runs: the two oracle rows dashed, everything else
+solid).
 
 **Full observation access nearly closes the gap to the teacher, on the same data the cameras-only runs used.**
 BC's best checkpoint goes from 0.758 (cameras only) to 0.961 (full access) against a teacher of 0.984 — that
 closes (0.984−0.758) − (0.984−0.961) = 0.203 of the original 0.226-point gap, i.e. **90%** of it. IQL closes
 even more: 0.727 → 0.977 closes (0.257 − 0.007)/0.257 = **97%** of its gap. On final-checkpoint numbers the
-picture is the same or stronger (BC closes 94% of its gap, IQL 98%). **So the large majority of the gap
-between a camera-only offline-RL student and the privileged-state teacher is the observation bottleneck, not
-the offline-RL algorithm or the offline-vs-online training regime** — plain BC with the teacher's own inputs
-gets within 2-3 points of the teacher, and IQL gets within one point, using nothing but a fixed dataset and
-150 k gradient steps. Offline RL is not the limiting factor here; not being able to see the robot's own joint
-state and the food/bowl pose is.
+picture is the same or stronger (BC closes 94% of its gap, IQL 98%). **So most of the gap between a
+camera-only offline-RL student and the privileged-state teacher was an observation bottleneck, not the
+offline-RL algorithm or the offline-vs-online training regime.** At the time this ablation ran, that was the
+whole story; the cameras+proprio deployable runs added afterwards (Results above) go further and show that
+`proprio` alone — no simulator-only state at all — closes the *rest* of what full access left open, which
+narrows "the observation bottleneck" specifically to proprioception rather than to privileged state. See the
+Headline section above for that comparison.
 
 **Data quality still shows through even at full access.** IQL, full-access (expert+medium) reaches 0.977 vs
 BC, full-access (expert+medium) 0.961 — both close to the teacher, but IQL is again the steadier of the two

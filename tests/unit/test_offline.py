@@ -339,3 +339,24 @@ def test_the_deterministic_actor_maps_observations_into_the_action_bounds():
     action = out.get("action")
     assert action.shape == (5, ACTION_DIM)
     assert action.abs().max() <= 1.0
+
+
+def test_only_td3_bc_gets_a_deterministic_actor():
+    """``TD3BCLoss`` reads ``action`` straight out of the actor and adds the exploration noise itself.
+
+    Handing it the shared ``TanhNormal`` actor would make its policy extraction meaningless while still
+    running, training and checkpointing without a single error — so the actor type is pinned here.
+    """
+    algos = {name: _load_algo_module(name).make_algo(_algo_cfg(name), ALGO_SHAPES, ALGO_KEYS, ACTION_DIM,
+                                                     torch.device("cpu")) for name in ALGORITHMS}
+
+    td3_actor = algos["td3_bc"].loss_module.actor_network
+    assert "action" in td3_actor.out_keys
+    assert not hasattr(td3_actor, "get_dist"), "TD3+BC's actor must not be a distribution"
+    batch = _algo_batch(batch_size=4).select(*ALGO_KEYS)
+    assert torch.equal(td3_actor(batch.clone()).get("action"), td3_actor(batch.clone()).get("action"))
+
+    for name, actor in (("bc", algos["bc"].policy),
+                        ("iql", algos["iql"].loss_module.actor_network),
+                        ("cql", algos["cql"].loss_module.actor_network)):
+        assert hasattr(actor, "get_dist"), f"{name} extracts its policy from a distribution"

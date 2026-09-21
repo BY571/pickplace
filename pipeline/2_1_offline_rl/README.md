@@ -163,12 +163,36 @@ algorithm.
 
 ### Observation access: how much of the gap is the camera bottleneck?
 
+Same `expert_v3c` + `medium_v3c` data as the baselines, but `network.in_keys` extended from cameras-only to
+`[[pixels,overview_rgb],[pixels,wrist_rgb],proprio,belt,privileged]` — everything the teacher itself saw, via
+`pickplace.keys.expand_in_keys`. **This is a ceiling, not a deployable policy**: a real deployment has no
+privileged food/bowl pose, so treat these two rows as measuring the observation bottleneck, not as a
+candidate to ship.
+
 | Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|
-| BC | `students/bc_full_access` (pixels+proprio+belt+privileged) | *pending* | | | | |
-| IQL | `students/iql_full_access` (pixels+proprio+belt+privileged) | *pending* | | | | |
+| BC | `students/bc_full_access` (pixels+proprio+belt+privileged) | **0.961 @ 110 k** | 0.953 | 0.934 | 0.78 h | [nyl05r0b](https://wandb.ai/sebastian-dittert/food_robot/runs/nyl05r0b) |
+| IQL | `students/iql_full_access` (pixels+proprio+belt+privileged) | **0.977 @ 150 k** | 0.977 | 0.944 | 2.04 h | [qg07vj09](https://wandb.ai/sebastian-dittert/food_robot/runs/qg07vj09) |
 
-*(filled in once both full-access runs finish; see the ablations report for the final table and interpretation.)*
+![All six runs vs the teacher](../../docs/experiments/offline_rl/success_rate_all.png)
+
+**Full observation access nearly closes the gap to the teacher, on the same data the cameras-only runs used.**
+BC's best checkpoint goes from 0.758 (cameras only) to 0.961 (full access) against a teacher of 0.984 — that
+closes (0.984−0.758) − (0.984−0.961) = 0.203 of the original 0.226-point gap, i.e. **90%** of it. IQL closes
+even more: 0.727 → 0.977 closes (0.257 − 0.007)/0.257 = **97%** of its gap. On final-checkpoint numbers the
+picture is the same or stronger (BC closes 94% of its gap, IQL 98%). **So the large majority of the gap
+between a camera-only offline-RL student and the privileged-state teacher is the observation bottleneck, not
+the offline-RL algorithm or the offline-vs-online training regime** — plain BC with the teacher's own inputs
+gets within 2-3 points of the teacher, and IQL gets within one point, using nothing but a fixed dataset and
+150 k gradient steps. Offline RL is not the limiting factor here; not being able to see the robot's own joint
+state and the food/bowl pose is.
+
+**Data quality still shows through even at full access.** IQL, full-access (expert+medium) reaches 0.977 vs
+BC, full-access (expert+medium) 0.961 — both close to the teacher, but IQL is again the steadier of the two
+(its evaluation curve stays in the 0.90-0.98 band from 30 k on, where BC dips to 0.89 mid-run). The
+expert-only vs expert+medium effect documented above is specific to the camera-only bottleneck being present;
+once the student can see what the teacher saw, 2 M transitions of mixed-quality data are enough to reach the
+ceiling regardless.
 
 ## Adding an algorithm
 

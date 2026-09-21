@@ -1,5 +1,7 @@
 """The transition index is the piece most likely to be silently wrong, so it is tested exhaustively."""
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -8,8 +10,10 @@ from pickplace.artifacts import write_json
 from pickplace.datasets import STORAGE_DIR
 from pickplace.offline import (
     CAMERA_KEYS,
+    PixelNet,
     ShardTransitions,
     TransitionSampler,
+    resolve_obs_keys,
     split_batch,
     student_env_cfg,
     transition_index,
@@ -191,3 +195,68 @@ def test_student_env_cfg_forces_cameras_on_and_a_single_frame():
 
 def test_camera_keys_are_the_two_views():
     assert CAMERA_KEYS == (("pixels", "overview_rgb"), ("pixels", "wrist_rgb"))
+
+
+# --------------------------------------------------------------------------------------------------
+# network.in_keys expansion
+# --------------------------------------------------------------------------------------------------
+
+
+def test_resolve_obs_keys_expands_a_group_name(tmp_path):
+    _fake_shard(tmp_path)
+    assert resolve_obs_keys(tmp_path, ["proprio"]) == [("proprio", "ee_pos")]
+
+
+def test_resolve_obs_keys_passes_explicit_leaves_through_unchanged(tmp_path):
+    _fake_shard(tmp_path)
+    keys = [["pixels", "overview_rgb"], ["pixels", "wrist_rgb"]]
+    assert resolve_obs_keys(tmp_path, keys) == [("pixels", "overview_rgb"), ("pixels", "wrist_rgb")]
+
+
+def test_resolve_obs_keys_mixes_leaves_and_groups_in_first_seen_order(tmp_path):
+    _fake_shard(tmp_path)
+    keys = [["pixels", "wrist_rgb"], "proprio", ["pixels", "overview_rgb"]]
+    assert resolve_obs_keys(tmp_path, keys) == [
+        ("pixels", "wrist_rgb"), ("proprio", "ee_pos"), ("pixels", "overview_rgb"),
+    ]
+
+
+# --------------------------------------------------------------------------------------------------
+# PixelNet: image-only, vector-only and mixed forward passes
+# --------------------------------------------------------------------------------------------------
+
+
+def _network_cfg(**overrides):
+    base = dict(cnn_channels=[4], cnn_kernels=[3], cnn_strides=[1], image_embed=8, proprio_embed=6, fusion=[16])
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_pixelnet_forward_image_only():
+    net = PixelNet([(8, 8, 3), (8, 8, 3)], _network_cfg(), out_dim=4, out_gain=1.0)
+    out = net(torch.randint(0, 256, (2, 8, 8, 3), dtype=torch.uint8),
+              torch.randint(0, 256, (2, 8, 8, 3), dtype=torch.uint8))
+    assert out.shape == (2, 4)
+    assert net.vec is None
+
+
+def test_pixelnet_forward_vector_only():
+    net = PixelNet([(5,), (3,)], _network_cfg(), out_dim=3, out_gain=1.0)
+    out = net(torch.randn(2, 5), torch.randn(2, 3))
+    assert out.shape == (2, 3)
+    assert len(net.cnns) == 0
+    assert net.vec is not None
+
+
+def test_pixelnet_forward_mixed_image_and_vector():
+    net = PixelNet([(8, 8, 3), (4,)], _network_cfg(), out_dim=2, out_gain=1.0)
+    out = net(torch.randint(0, 256, (2, 8, 8, 3), dtype=torch.uint8), torch.randn(2, 4))
+    assert out.shape == (2, 2)
+    assert len(net.cnns) == 1 and net.vec is not None
+
+
+def test_pixelnet_forward_with_extra_raw_vector_for_a_qvalue_head():
+    # As make_qvalue does: obs keys (mixed) followed by the action as an unembedded extra input.
+    net = PixelNet([(8, 8, 3), (4,)], _network_cfg(), out_dim=1, out_gain=1.0, extra_dim=7)
+    out = net(torch.randint(0, 256, (2, 8, 8, 3), dtype=torch.uint8), torch.randn(2, 4), torch.randn(2, 7))
+    assert out.shape == (2, 1)

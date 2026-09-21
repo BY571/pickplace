@@ -9,9 +9,6 @@ matmul_precision: high
 data:
   shards: [expert_v3c, medium_v3c]   # names resolve under $FOOD_ROBOT_ARTIFACTS/shards
   proportions: [0.5, 0.5]            # rows per batch drawn from each shard
-  obs_keys:                          # cameras only: the student must infer arm/gripper state from pixels
-    - [pixels, overview_rgb]
-    - [pixels, wrist_rgb]
   include_terminals: true            # keep terminated rows as masked-bootstrap pairs (the success bonus)
 
 batch_size: 256
@@ -22,11 +19,15 @@ log_interval: 200                    # gradient steps per METRICS line
 prefetch_depth: 6                    # batches read ahead from the memmaps by background threads
 prefetch_workers: 3
 
-network:                             # one Nature-CNN per camera -> fusion MLP; separate nets per head
+network:                             # one Nature-CNN per camera (+ an MLP branch for any vector groups)
+  in_keys:                           # groups/leaf keys (pickplace.keys.expand_in_keys); default: cameras only
+    - [pixels, overview_rgb]         # so the student must infer arm/gripper state from pixels
+    - [pixels, wrist_rgb]
   cnn_channels: [32, 64, 64]
   cnn_kernels: [8, 4, 3]
   cnn_strides: [4, 2, 1]
   image_embed: 256
+  proprio_embed: 128                 # vector-branch width; unused while in_keys is cameras-only
   fusion: [512, 256]
 
 eval:

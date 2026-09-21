@@ -3,7 +3,7 @@
 Every algorithm gets the same data mix, the same inputs, the same evaluation protocol and the same budget;
 only ``make_algo`` differs. An algorithm module exposes::
 
-    make_algo(cfg, image_shapes, obs_keys, action_dim, device) -> Algo
+    make_algo(cfg, obs_shapes, obs_keys, action_dim, device) -> Algo
 
     class Algo:
         policy: TensorDictModule   # what is evaluated and checkpointed as the student
@@ -29,7 +29,7 @@ import torch
 from omegaconf import OmegaConf
 
 from pickplace.artifacts import artifacts_root, git_commit, new_run_dir, sha256_file, update_json, write_json
-from pickplace.offline import TransitionSampler, evaluate_student, make_student_env, prefetch
+from pickplace.offline import TransitionSampler, evaluate_student, make_student_env, prefetch, resolve_obs_keys
 from pickplace.system import memory_used_gb
 
 
@@ -51,9 +51,12 @@ def train(cfg, make_algo, kind: str) -> None:
     manifest_path = run_dir / "manifest.json"
     config = OmegaConf.to_container(cfg, resolve=True)
 
-    obs_keys = [tuple(k) if not isinstance(k, str) else k for k in cfg.data.obs_keys]
+    shard_paths = _shard_paths(cfg)
+    # network.in_keys may name whole observation groups (e.g. "proprio"); resolve them against the shard's
+    # own stored structure once, up front, so the sampler and the networks agree on the same leaf keys.
+    obs_keys = resolve_obs_keys(shard_paths[0], cfg.network.in_keys)
     sampler = TransitionSampler(
-        _shard_paths(cfg),
+        shard_paths,
         proportions=cfg.data.proportions,
         batch_size=cfg.batch_size,
         obs_keys=obs_keys,
@@ -71,18 +74,16 @@ def train(cfg, make_algo, kind: str) -> None:
 
     probe = sampler.sample()
     shapes = {k: tuple(probe.get(k).shape[1:]) for k in sampler.obs_keys}
-    if any(len(s) != 3 for s in shapes.values()):
-        raise ValueError(f"The student takes camera observations only (H x W x C); got shapes {shapes}.")
-    image_shapes = [shapes[k] for k in sampler.obs_keys]
+    obs_shapes = [shapes[k] for k in sampler.obs_keys]
     action_dim = int(probe.get("action").shape[-1])
 
-    algo = make_algo(cfg, image_shapes, sampler.obs_keys, action_dim, device)
+    algo = make_algo(cfg, obs_shapes, sampler.obs_keys, action_dim, device)
     total_steps = int(cfg.gradient_steps)
     print("RUN_INFO " + json.dumps({
         "run_dir": str(run_dir), "algorithm": kind, "gradient_steps": total_steps,
         "batch_size": cfg.batch_size, "rows_per_batch": sampler.counts,
         "transitions": len(sampler), "obs_keys": [list(k) for k in sampler.obs_keys],
-        "image_shapes": [list(s) for s in image_shapes], "action_dim": action_dim,
+        "image_shapes": [list(s) for s in obs_shapes], "action_dim": action_dim,
         "shards": [p["name"] for p in provenance],
         "parameters": sum(p.numel() for p in algo.policy.parameters()),
     }), flush=True)
@@ -127,7 +128,7 @@ def train(cfg, make_algo, kind: str) -> None:
         path = run_dir / "checkpoints" / f"{name}.pt"
         tmp = path.with_name(path.name + ".tmp")
         torch.save({**algo.state_dict(), "step": step, "config": config,
-                    "obs_keys": [list(k) for k in sampler.obs_keys], "image_shapes": [list(s) for s in image_shapes],
+                    "obs_keys": [list(k) for k in sampler.obs_keys], "image_shapes": [list(s) for s in obs_shapes],
                     "action_dim": action_dim}, tmp)
         tmp.replace(path)
         if eval_env is not None and latest_eval_step != step:

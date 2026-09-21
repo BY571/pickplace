@@ -39,10 +39,10 @@ class IQL:
                 "optim": self.optim.state_dict()}
 
 
-def make_algo(cfg, image_shapes, obs_keys, action_dim, device):
-    actor = make_actor(image_shapes, obs_keys, action_dim, cfg.network, device)
-    qvalue = make_qvalue(image_shapes, obs_keys, action_dim, cfg.network, device)
-    value = make_value(image_shapes, obs_keys, cfg.network, device)
+def make_algo(cfg, obs_shapes, obs_keys, action_dim, device):
+    actor = make_actor(obs_shapes, obs_keys, action_dim, cfg.network, device)
+    qvalue = make_qvalue(obs_shapes, obs_keys, action_dim, cfg.network, device)
+    value = make_value(obs_shapes, obs_keys, cfg.network, device)
     loss_module = IQLLoss(
         actor,
         qvalue,

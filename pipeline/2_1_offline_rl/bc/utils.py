@@ -42,6 +42,6 @@ class BC:
         return {"actor": self.policy.state_dict(), "optim": self.optim.state_dict()}
 
 
-def make_algo(cfg, image_shapes, obs_keys, action_dim, device):
-    actor = make_actor(image_shapes, obs_keys, action_dim, cfg.network, device)
+def make_algo(cfg, obs_shapes, obs_keys, action_dim, device):
+    actor = make_actor(obs_shapes, obs_keys, action_dim, cfg.network, device)
     return BC(actor, cfg.optim.lr, cfg.optim.max_grad_norm)

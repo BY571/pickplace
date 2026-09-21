@@ -121,7 +121,7 @@ def test_offline_trainer_trains_evaluates_and_checkpoints(algorithm, losses, tmp
         assert 0.0 <= manifest["eval"]["success_rate"] <= 1.0 and manifest["eval_num_envs"] == 4
         assert len(manifest["shards"]) == 2 and manifest["shards"][0]["proportion"] == 0.5
         assert manifest["shards"][0]["successor_stride"] == STRIDE and manifest["git_commit"]
-        assert manifest["config"]["data"]["obs_keys"] == [["pixels", "overview_rgb"], ["pixels", "wrist_rgb"]]
+        assert manifest["config"]["network"]["in_keys"] == [["pixels", "overview_rgb"], ["pixels", "wrist_rgb"]]
         assert torch.load(path.with_suffix(".pt"), map_location="cpu", weights_only=False)["actor"]
 
     manifest = json.loads((run / "manifest.json").read_text())

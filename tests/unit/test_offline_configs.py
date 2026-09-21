@@ -29,7 +29,7 @@ def test_the_comparison_protocol_is_identical_across_algorithms(key):
 
 @pytest.mark.parametrize("name", ALGORITHMS)
 def test_students_see_only_the_two_cameras(name):
-    assert _config(name)["data"]["obs_keys"] == [["pixels", "overview_rgb"], ["pixels", "wrist_rgb"]]
+    assert _config(name)["network"]["in_keys"] == [["pixels", "overview_rgb"], ["pixels", "wrist_rgb"]]
 
 
 @pytest.mark.parametrize("name", ALGORITHMS)

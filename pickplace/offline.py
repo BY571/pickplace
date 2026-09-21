@@ -36,6 +36,7 @@ from torch import nn
 from torchrl.modules import MLP, ProbabilisticActor, TanhNormal, ValueOperator
 
 from pickplace.datasets import STORAGE_DIR, shard_manifest
+from pickplace.keys import expand_in_keys
 
 #: Student inputs for the first runs: both 84 px camera views, nothing else.
 CAMERA_KEYS: tuple[tuple[str, str], ...] = (("pixels", "overview_rgb"), ("pixels", "wrist_rgb"))
@@ -43,6 +44,21 @@ CAMERA_KEYS: tuple[tuple[str, str], ...] = (("pixels", "overview_rgb"), ("pixels
 
 def as_key(key) -> tuple[str, ...]:
     return (key,) if isinstance(key, str) else tuple(key)
+
+
+def resolve_obs_keys(shard_path, in_keys: Sequence) -> list[tuple[str, ...]]:
+    """Expand ``network.in_keys`` group names (e.g. ``"proprio"``) into the leaves a shard actually stores.
+
+    Builds a spec from one memmapped row with ``make_composite_from_td`` -- no simulator needed -- and
+    resolves it with ``pickplace.keys.expand_in_keys``, exactly as the pixel-PPO pipeline resolves its own
+    ``network.actor_in_keys`` / ``critic_in_keys`` against a live env's observation spec. Explicit leaf keys
+    (e.g. ``["pixels", "wrist_rgb"]``) pass through unchanged, so the cameras-only default is a no-op here.
+    """
+    from torchrl.envs.utils import make_composite_from_td
+
+    row = TensorDict.load_memmap(str(Path(shard_path) / STORAGE_DIR))[0]
+    spec = make_composite_from_td(row)
+    return expand_in_keys(spec, in_keys)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -247,24 +263,39 @@ class ConvEncoder(nn.Module):
 
 
 class PixelNet(nn.Module):
-    """One CNN per camera, concatenated with any vector inputs (e.g. the action) -> fusion MLP -> head.
+    """One CNN per image key + one shared MLP branch over vector keys, fused into an output head.
+
+    ``shapes`` lists each key's trailing per-env shape, in the same order as the module's ``in_keys``: a
+    3-D shape (H, W, C) gets its own ``ConvEncoder``; anything else is flattened and concatenated into one
+    vector branch (``Linear`` -> ``LayerNorm`` -> ``ELU``) before the fusion MLP -- same shape as
+    ``sota-implementations/ppo/utils_pixels.py``'s ``PixelsNet`` (which the pipeline may not import from).
+    ``extra_dim`` appends one more *raw*, unembedded vector after the fused features -- used for the action
+    in a Q-network, which should not be normalised like an observation.
 
     Each network (actor, every critic, the value net) gets its own encoders: the actor's objective and the
     critics' TD targets pull an encoder in different directions, and a shared trunk would need loss-specific
-    gradient stopping to stay stable. Four 84 px Nature CNNs are cheap enough that sharing buys little.
+    gradient stopping to stay stable. A handful of 84 px Nature CNNs are cheap enough that sharing buys little.
     """
 
-    def __init__(self, image_shapes: Sequence[tuple[int, int, int]], network_cfg, out_dim: int,
-                 out_gain: float, vector_dim: int = 0):
+    def __init__(self, shapes: Sequence[tuple[int, ...]], network_cfg, out_dim: int, out_gain: float,
+                 extra_dim: int = 0):
         super().__init__()
-        self.image_shapes = [tuple(s) for s in image_shapes]
+        self.shapes = [tuple(s) for s in shapes]
+        self.is_image = [len(s) == 3 for s in self.shapes]
         self.cnns = nn.ModuleList(
             ConvEncoder(s, list(network_cfg.cnn_channels), list(network_cfg.cnn_kernels),
                         list(network_cfg.cnn_strides), int(network_cfg.image_embed))
-            for s in self.image_shapes
+            for s, image in zip(self.shapes, self.is_image) if image
         )
-        self.vector_dim = int(vector_dim)
-        fused = len(self.cnns) * int(network_cfg.image_embed) + self.vector_dim
+        vec_dim = sum(math.prod(s) for s, image in zip(self.shapes, self.is_image) if not image)
+        self.vec = (
+            nn.Sequential(nn.Linear(vec_dim, int(network_cfg.proprio_embed)),
+                          nn.LayerNorm(int(network_cfg.proprio_embed)), nn.ELU())
+            if vec_dim else None
+        )
+        self.extra_dim = int(extra_dim)
+        fused = (len(self.cnns) * int(network_cfg.image_embed)
+                 + (int(network_cfg.proprio_embed) if vec_dim else 0) + self.extra_dim)
         self.mlp = MLP(in_features=fused, out_features=out_dim, num_cells=list(network_cfg.fusion),
                        activation_class=nn.ELU)
         linears = [m for m in self.mlp.modules() if isinstance(m, nn.Linear)]
@@ -274,8 +305,15 @@ class PixelNet(nn.Module):
         nn.init.orthogonal_(linears[-1].weight, out_gain)
 
     def forward(self, *xs: torch.Tensor) -> torch.Tensor:
-        n = len(self.cnns)
-        parts = [cnn(x) for cnn, x in zip(self.cnns, xs[:n])]
+        n = len(self.shapes)
+        cnn_iter = iter(self.cnns)
+        images, vectors = [], []
+        for x, shape, image in zip(xs[:n], self.shapes, self.is_image):
+            if image:
+                images.append(next(cnn_iter)(x))
+            else:
+                vectors.append(x.float().reshape(*x.shape[: x.dim() - len(shape)], -1))
+        parts = images + ([self.vec(torch.cat(vectors, dim=-1))] if self.vec is not None else [])
         parts += [x.float().reshape(*x.shape[:-1], -1) for x in xs[n:]]
         return self.mlp(torch.cat(parts, dim=-1))
 
@@ -292,9 +330,9 @@ class _ActorNet(nn.Module):
         return self.scale(self.body(*xs))
 
 
-def make_actor(image_shapes, obs_keys, action_dim: int, network_cfg, device) -> ProbabilisticActor:
+def make_actor(shapes, obs_keys, action_dim: int, network_cfg, device) -> ProbabilisticActor:
     """TanhNormal actor on [-1, 1] with a state-independent scale (as in the teacher and pixel PPO)."""
-    body = PixelNet(image_shapes, network_cfg, action_dim, out_gain=0.01)
+    body = PixelNet(shapes, network_cfg, action_dim, out_gain=0.01)
     module = TensorDictModule(_ActorNet(body, action_dim), in_keys=[as_key(k) for k in obs_keys],
                               out_keys=["loc", "scale"])
     from torchrl.envs import ExplorationType
@@ -315,16 +353,16 @@ def make_actor(image_shapes, obs_keys, action_dim: int, network_cfg, device) -> 
     return actor.to(device)
 
 
-def make_qvalue(image_shapes, obs_keys, action_dim: int, network_cfg, device) -> TensorDictModule:
-    """Q(s, a): the camera encoders plus the action, concatenated into the fusion MLP."""
-    body = PixelNet(image_shapes, network_cfg, 1, out_gain=1.0, vector_dim=action_dim)
+def make_qvalue(shapes, obs_keys, action_dim: int, network_cfg, device) -> TensorDictModule:
+    """Q(s, a): the observation encoders plus the raw action, concatenated into the fusion MLP."""
+    body = PixelNet(shapes, network_cfg, 1, out_gain=1.0, extra_dim=action_dim)
     keys = [as_key(k) for k in obs_keys] + ["action"]
     return TensorDictModule(body, in_keys=keys, out_keys=["state_action_value"]).to(device)
 
 
-def make_value(image_shapes, obs_keys, network_cfg, device) -> ValueOperator:
-    """V(s) over the camera encoders."""
-    body = PixelNet(image_shapes, network_cfg, 1, out_gain=1.0)
+def make_value(shapes, obs_keys, network_cfg, device) -> ValueOperator:
+    """V(s) over the observation encoders."""
+    body = PixelNet(shapes, network_cfg, 1, out_gain=1.0)
     return ValueOperator(body, in_keys=[as_key(k) for k in obs_keys], out_keys=["state_value"]).to(device)
 
 

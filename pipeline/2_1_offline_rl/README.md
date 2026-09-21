@@ -12,7 +12,7 @@ Every algorithm in this folder gets the same everything except its loss:
 | | |
 |---|---|
 | **Data** | `expert_v3c` + `medium_v3c`, 50/50 rows per batch (2,014,214 legal transitions, 14,333 of them terminal) |
-| **Student inputs** | **cameras only** — `("pixels","overview_rgb")` and `("pixels","wrist_rgb")`, 84x84x3 uint8, **one frame each**. No proprioception, no privileged state, no bowl pose. |
+| **Student inputs** | **cameras only** by default — `("pixels","overview_rgb")` and `("pixels","wrist_rgb")`, 84x84x3 uint8, **one frame each**. No proprioception, no privileged state, no bowl pose. Configurable via `network.in_keys` (group names or leaf keys, expanded with `pickplace.keys.expand_in_keys`); vector groups go through an MLP branch and concatenate with the CNN features (`pickplace.offline.PixelNet`, same shape as `sota-implementations/ppo/utils_pixels.py::PixelsNet`). |
 | **Networks** | one Nature-CNN encoder per camera (32/64/64 channels, 8/4/3 kernels, 4/2/1 strides, 256-d embedding) → fusion MLP `[512, 256]`. Separate encoders per head (actor, each Q, V). |
 | **Batch** | 256 transitions |
 | **Budget** | 150,000 gradient steps (~19 passes over the data) |
@@ -60,7 +60,8 @@ precomputed subset *and* its successor row has to be gathered at `+stride`, whic
     ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/iql/train.py
 
 Useful overrides: `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,noisy_v3c]`,
-`data.proportions=[...]`, `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
+`data.proportions=[...]`, `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio,belt,privileged]`
+(cameras + everything the teacher saw), `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
 IQL's `loss.expectile=` / `loss.temperature=` / `loss.gamma=` / `loss.target_tau=`, `run.name=`,
 `logger.backend=null`. Stop a run cleanly (final checkpoint + evaluation) with
 
@@ -123,7 +124,7 @@ Create `pipeline/2_1_offline_rl/<algo>/{train.py,utils.py,config.yaml}`:
 
 * `config.yaml` — copy another algorithm's file and change only the block below `optim:` (the parity test
   enforces the rest).
-* `utils.py` — `make_algo(cfg, image_shapes, obs_keys, action_dim, device)` returning an object with
+* `utils.py` — `make_algo(cfg, obs_shapes, obs_keys, action_dim, device)` returning an object with
   `.policy` (the module that is evaluated and checkpointed), `.update(batch) -> {name: scalar}` and
   `.state_dict()`. Build the networks with `pickplace.offline.make_actor` / `make_qvalue` / `make_value` so
   the architecture stays identical.

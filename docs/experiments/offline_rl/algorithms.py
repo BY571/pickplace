@@ -51,7 +51,10 @@ ax.set_title("Offline-RL algorithms on deployable observations: mean over 3 seed
              fontsize=15)
 ax.set_xlabel("Gradient steps", fontsize=15)
 ax.set_ylabel("Online success rate\n(128 evaluation episodes)", fontsize=15)
-ax.set_ylim(0, 1.05)
+# All four algorithms sit near the teacher's ceiling, so a 0-100% axis would hide every difference the
+# comparison is about; the axis starts just below the worst evaluation instead (and never above 60%).
+floor = min(0.6, max(0.0, min(v.min() for _, v in series.values()) - 0.05))
+ax.set_ylim(floor, 1.02)
 ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.0%}"))
 ax.tick_params(labelsize=12)
 ax.legend(fontsize=15, loc="lower right")

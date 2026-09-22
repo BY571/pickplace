@@ -1,9 +1,9 @@
 # Stage 2.1 · offline RL from the camera shards
 
-Train a **camera-only student** on the shards recorded in stage 1, with no simulator in the loop except for
-evaluation. Behaviour cloning is the baseline; IQL is the first value-based algorithm. CQL and TD3+BC will
-follow the same shape, so that the only thing that differs between rows of the results table is the
-objective.
+Train a **deployable student** on the shards recorded in stage 1, with no simulator in the loop except for
+evaluation. Four algorithms live here — **BC**, **IQL**, **CQL** and **TD3+BC** — sharing one runner, one
+set of networks, one data mix and one evaluation protocol, so that the only thing that differs between rows
+of the results table is the objective.
 
 ## The comparison protocol
 
@@ -20,12 +20,86 @@ Every algorithm in this folder gets the same everything except its loss:
 | **Reward** | scaled by 0.1 before the loss (BC ignores it) |
 
 `tests/unit/test_offline_configs.py` asserts that the shared block of every `config.yaml` in this folder is
-identical, so the protocol cannot drift between algorithms by accident.
+identical, so the protocol cannot drift between algorithms by accident. The committed defaults are the
+image-only, expert+medium, 150 k-step protocol the first runs used; the four-algorithm comparison below
+overrides the data, the inputs and the budget on the command line, identically for every algorithm.
 
 **The student has to infer arm and gripper state from pixels.** Nothing in its input says where the joints
 are, whether the gripper is open or whether the food is held — that has to come out of the wrist view (the
 overview camera mostly supplies the bowl's position on the belt). This is the interesting part of the
 setting and the main reason a camera-only student is expected to fall short of the privileged teacher.
+
+## What each algorithm adds, and where its hyperparameters come from
+
+Every algorithm uses `pickplace.offline`'s networks (`make_actor` / `make_qvalue` / `make_value`), Adam at
+`lr 3e-4`, and gradient clipping at norm 10 — the same optimizer for all four, so the objective is the only
+difference. Defaults come from TorchRL's own `sota-implementations` configs; the deviations are listed.
+
+| | Objective | Hyperparameters (all in `<algo>/config.yaml`) |
+|---|---|---|
+| **BC** | maximise the log-probability of the dataset action under the TanhNormal actor | none beyond the optimizer |
+| **IQL** | expectile value loss + advantage-weighted policy (`IQLLoss`) | `expectile 0.7`, `temperature 3.0`, twin Q, `target_tau 0.005` |
+| **CQL** | SAC actor + a conservative log-sum-exp penalty on out-of-distribution actions (`CQLLoss`) | `temperature 1.0`, `with_lagrange true` / `lagrange_thresh 5.0`, `num_random 2`, `policy_eval_start 4_000`, entropy `alpha` learned from 1.0 |
+| **TD3+BC** | TD3 with the actor's Q term rescaled so a BC term stays comparable to it (`TD3BCLoss`) | `alpha 2.5`, `policy_noise 0.2`, `noise_clip 0.5`, `policy_update_delay 2`, twin Q, `target_tau 0.005` |
+
+**CQL.** `temperature 1.0`, `with_lagrange true` with `lagrange_thresh 5.0`, `max_q_backup false` and
+`deterministic_backup false` are exactly `sota-implementations/cql/offline_config.yaml`. The entropy
+weight (`alpha`) is *not* pinned: as in the sota script it is learned from `alpha_init 1.0` against
+`target_entropy "auto"` (= −action_dim), which is why the config has no `alpha` entry. Two deviations:
+
+* **`num_random 2`, not 10.** The conservative penalty evaluates `3 × num_random × batch` state-action
+  pairs through both Q nets on every gradient step. With an MLP over a state vector — the sota's setting —
+  that is nearly free; with a Nature CNN per camera it re-encodes 84 px images and becomes the entire cost
+  of the run. Measured on the Spark at batch 256 with image+proprio inputs: **8.4 / 5.2 / ~2.4 gradient
+  steps per second at `num_random` 2 / 4 / 10**, i.e. **3.3 h / 5.3 h / ~11.5 h per 100 k-step run**,
+  against 22 steps/s for IQL and 35 for TD3+BC. `num_random 2` is the largest value that keeps three seeds
+  inside the grid's wall clock, and it is the one number to raise first if CQL ever looks under-conservative.
+* **`policy_eval_start 4_000`, not 40 000.** The sota warm-starts the actor on the behaviour-cloning term
+  for the first 40 k of its 1 M gradient steps; 4 k is the same 4% of our 100 k budget.
+
+`loss_function smooth_l1` rather than the sota's `l2`, for the reason IQL already uses it here: `l2` needs
+about ten times the gradient norm for the same fit on this reward scale.
+
+**TD3+BC.** `policy_noise 0.2`, `noise_clip 0.5`, `policy_update_delay 2` and `target_tau 0.005` (the
+sota's `target_update_polyak 0.995`) are `sota-implementations/td3_bc/config.yaml` unchanged — the paper's
+values. Again `smooth_l1` instead of `l2`. The sota's `adam_eps 1e-4` is *not* adopted: keeping one
+optimizer across the four algorithms matters more here than one algorithm's epsilon. TD3+BC is the one
+algorithm that cannot use the shared stochastic actor — `TD3BCLoss` reads `action` straight out of the
+actor and adds the target-policy smoothing noise itself — so it uses
+`pickplace.offline.make_deterministic_actor`: the same `PixelNet` body with a tanh head instead of a
+TanhNormal distribution. `tests/unit/test_offline.py::test_only_td3_bc_gets_a_deterministic_actor` pins
+that, because handing `TD3BCLoss` the stochastic actor would run, train and checkpoint without any error
+while making its policy extraction meaningless.
+
+* **`alpha 0.025`, not the paper's 2.5 — and this is the one number that had to be measured rather than
+  copied.** `alpha` sets the Q-vs-BC balance: the loss scales the Q term by `lambda = alpha / mean|Q|`.
+  On `expert_v3c` the paper's value gives **0.000 success for 60 k gradient steps** and 0.109 at 100 k.
+  The reason is the data, not the loss (whose TD target, terminal masking and successor lookup were
+  checked against a hand computation): `expert_v3c` has `noise_sigma = 0.0`, one deterministic teacher
+  rolled out, so **every state in it was visited with exactly one action** and `Q(s, ·)` has no
+  counterfactual to fit. Measured on a trained critic, `Q` varies by ±40 across states and by about **2**
+  across actions — yet TD3+BC's own `alpha / mean|Q|` normalisation makes that action-blind gradient
+  exactly as large as the BC gradient (0.0277 vs 0.0281), so half the actor's gradient is noise and the
+  action MSE comes out 63× worse than BC's. Sweep at 20 k gradient steps, same protocol:
+
+  | Data | `alpha` | 5 k | 10 k | 15 k | 20 k |
+  |---|---|---|---|---|---|
+  | `expert_v3c` | 2.5 (paper) | 0.000 | 0.000 | 0.000 | 0.000 |
+  | `expert_v3c` | 0.25 | 0.016 | 0.102 | 0.227 | 0.227 |
+  | `expert_v3c` | **0.025** | **0.680** | **0.719** | 0.617 | 0.648 |
+  | `noisy_v3c` (`noise_sigma 0.2`) | 2.5 | 0.000 | 0.000 | 0.359 | 0.242 |
+
+  Both knobs move the same way — shrinking `alpha` switches the noisy Q gradient off, and *adding action
+  noise to the data* helps at the paper's `alpha` — which is the signature of a missing counterfactual in
+  the data rather than of a misconfigured loss. Note the reward scale is not involved: `alpha / mean|Q|`
+  is scale-invariant, so the shared `reward_scale 0.1` cancels out of the balance. **On a dataset with
+  action noise, `alpha` should go back up towards 2.5.**
+
+**One wiring fix worth knowing about.** `CQLLoss` cannot be handed nested observation keys: it repeats the
+observation once per sampled action with `tensordict.named_apply`, which matches on *leaf* names, so
+`("pixels", "wrist_rgb")` never matches the actor's `in_keys` and is silently dropped from the repeated
+tensordict. `cql/utils.py` therefore aliases the shard's nested keys onto flat ones (a view, not a copy) and
+evaluates that aliasing module together with the actor. Nothing else in the folder is affected.
 
 ## Transitions: what a "pair of rows" is
 
@@ -53,18 +127,22 @@ precomputed subset *and* its successor row has to be gathered at `+stride`, whic
 
 ## Run
 
-    # baseline
-    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/bc/train.py
-
-    # IQL
+    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/bc/train.py       # baseline
     ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/iql/train.py
+    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/cql/train.py
+    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/td3_bc/train.py
 
-Useful overrides: `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,noisy_v3c]`,
+One run at a time: each one holds a 128-env camera evaluation env, and two Isaac jobs at once have
+OOM-killed the Spark. The four-algorithm comparison below was a single detached container looping over
+seeds and algorithms, exactly one training process alive at any moment.
+
+Useful overrides: `seed=`, `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,noisy_v3c]`,
 `data.proportions=[...]`, `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]`
 (the deployable image+proprio variant; `belt` — the bowl's pose — is the one further group a real cell
 might supply from a belt encoder), `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
-IQL's `loss.expectile=` / `loss.temperature=` / `loss.gamma=` / `loss.target_tau=`, `run.name=`,
-`logger.backend=null`. Stop a run cleanly (final checkpoint + evaluation) with
+any `loss.*` key of the algorithm (IQL's `expectile`/`temperature`, CQL's `num_random`/`lagrange_thresh`,
+TD3+BC's `alpha`/`policy_update_delay`), `run.name=`, `logger.backend=null`. Stop a run cleanly (final
+checkpoint + evaluation) with
 
     ssh spark 'docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"'
 
@@ -82,7 +160,96 @@ IQL's `loss.expectile=` / `loss.temperature=` / `loss.gamma=` / `loss.target_tau
 
 W&B project `food_robot`, group `offline_rl`.
 
-## Results
+## Results: the four-algorithm, three-seed comparison
+
+**One protocol, four objectives, three seeds.** `expert_v3c` only,
+`network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]` (the deployable set: both cameras plus
+the robot's own proprioception), 100,000 gradient steps, batch 256, evaluation every 10 k over 128 fresh
+camera envs, seeds 0/1/2, W&B group `offline_rl`, runs named `<algo>_expert_proprio_s<seed>`. Everything was
+run one at a time in a single detached container. Teacher reference, same evaluation protocol: **0.984**.
+
+![Offline-RL algorithms on deployable observations: mean over 3 seeds, min-max band](../../docs/experiments/offline_rl/algorithms.png)
+
+`mean ± half the seed range`. "Late stability" is the standard deviation of the last five evaluations,
+averaged over seeds — lower is steadier. Evaluation noise alone is ±0.019 (binomial standard error at
+p = 0.95 over 128 episodes), so **differences under about 0.04 are not differences**.
+
+| Algorithm | Best | Final | Mean of last 5 | Steps to 0.90 | Late stability (sd) | Wall clock | Seed runs |
+|---|---|---|---|---|---|---|---|
+| **BC** | 0.979 ± 0.008 | 0.948 ± 0.031 | 0.944 ± 0.016 | **20 k ± 10 k** | 0.025 | **0.38 h** | [u1dw6agg](https://wandb.ai/sebastian-dittert/food_robot/runs/u1dw6agg) · [hcnamspj](https://wandb.ai/sebastian-dittert/food_robot/runs/hcnamspj) · [sst10l1f](https://wandb.ai/sebastian-dittert/food_robot/runs/sst10l1f) |
+| **IQL** | **0.990 ± 0.012** | **0.953 ± 0.008** | **0.956 ± 0.011** | 27 k ± 15 k | 0.025 | 1.22 h | [29pbjq2u](https://wandb.ai/sebastian-dittert/food_robot/runs/29pbjq2u) · [hb56w7uy](https://wandb.ai/sebastian-dittert/food_robot/runs/hb56w7uy) · [9uup6qxu](https://wandb.ai/sebastian-dittert/food_robot/runs/9uup6qxu) |
+| **TD3+BC** (`alpha 0.025`) | 0.958 ± 0.008 | 0.922 ± 0.027 | 0.919 ± 0.019 | 63 k ± 5 k | 0.036 | 0.83 h | [eclg2kb9](https://wandb.ai/sebastian-dittert/food_robot/runs/eclg2kb9) · [u6nau6bv](https://wandb.ai/sebastian-dittert/food_robot/runs/u6nau6bv) · [9bz3kwr5](https://wandb.ai/sebastian-dittert/food_robot/runs/9bz3kwr5) |
+| TD3+BC at the paper's `alpha 2.5` | 0.219 | 0.109 | 0.102 | never | 0.090 | 0.83 h | [gc76ywhn](https://wandb.ai/sebastian-dittert/food_robot/runs/gc76ywhn) (seed 0 only — see above) |
+| **CQL** | *does not learn on this data — see below* | | | | | 3.3 h | |
+
+Per-seed numbers (best @ step / final / last-5 mean / last-5 sd / steps to 0.90):
+
+| | seed 0 | seed 1 | seed 2 |
+|---|---|---|---|
+| BC | 0.984 @ 30 k / 0.969 / 0.961 / 0.013 / 20 k | 0.984 @ 80 k / 0.906 / 0.944 / 0.030 / 10 k | 0.969 @ 100 k / 0.969 / 0.928 / 0.031 / 30 k |
+| IQL | 1.000 @ 70 k / 0.945 / 0.945 / 0.043 / 10 k | 0.977 @ 90 k / 0.961 / 0.967 / 0.006 / 40 k | 0.992 @ 90 k / 0.953 / 0.956 / 0.026 / 30 k |
+| TD3+BC | 0.969 @ 80 k / 0.914 / 0.934 / 0.039 / 70 k | 0.953 @ 80 k / 0.898 / 0.925 / 0.021 / 60 k | 0.953 @ 100 k / 0.953 / 0.897 / 0.047 / 60 k |
+
+### Which one would I pick, and do the differences beat the seed spread?
+
+**Pick BC.** On every success metric BC and IQL are the same policy as far as this protocol can tell: best
+0.979 vs 0.990, final 0.948 vs 0.953, last-5 mean 0.944 vs 0.956. Every one of those gaps (0.005–0.012) is
+smaller than the seed spread on that metric (±0.008 to ±0.031) *and* smaller than the ±0.019 evaluation
+noise, and the two algorithms' per-seed ranges overlap completely. IQL is nominally ahead on all three and
+its best seed is the only run to touch 1.000, but "nominally ahead inside the noise" is not a reason to pay
+**3.2× the wall clock** (1.22 h vs 0.38 h per run). Both reach the teacher's 0.984 at their best checkpoint
+and settle a couple of points below it, which is where the earlier single-seed runs already put them.
+
+**The differences that *are* real are speed and stability, and they separate TD3+BC, not BC from IQL.**
+Steps to 0.90 is the one metric with non-overlapping ranges: BC 10–30 k, IQL 10–40 k, TD3+BC **60–70 k**.
+TD3+BC is also the least steady late (0.036 vs 0.025) and lowest on every success metric — its last-5 mean
+0.919 ± 0.019 against BC's 0.944 ± 0.016 is the only success gap that even approaches significance. With a
+ceiling this high, "how fast" is the honest discriminator, and there BC wins outright.
+
+**What this comparison really measured.** Given that the four objectives land within noise of each other (or
+below), the useful conclusion is not about the objectives at all: on **zero-action-noise expert
+demonstrations** there is nothing for a value-based method to add. `expert_v3c` was recorded with
+`noise_sigma = 0.0` from a single deterministic teacher, so every state in it was visited with exactly one
+action and `Q(s, ·)` has no counterfactual to fit — measured on a trained critic, Q varies by ±40 across
+states and by about **2** across actions. The four algorithms then sort by **how much they let that
+action-blind Q move the policy**: BC not at all, IQL only as a re-weighting of a cloning term (advantage
+weighting never differentiates through Q), TD3+BC through an explicit Q gradient that has to be turned
+down by 100× to be harmless, and CQL through a Q gradient it has no term to trade against — which is why
+CQL does not learn here at all. **The next experiment is a dataset question, not an algorithm question:
+re-run this grid on data with action noise (`noisy_v3c`, or a re-recorded expert with `noise_sigma > 0`) and
+see whether IQL, CQL and TD3+BC can finally beat cloning instead of merely matching it.**
+
+### CQL: investigated, two misconfigurations fixed, still does not learn
+
+CQL is the one row this grid could not fill honestly. Three defects were found and two of them fixed:
+
+1. **The SAC entropy temperature diverges** (fixed). `CQLLoss` learns it against
+   `target_entropy = -action_dim`, but the shared actor's scale collapses while cloning
+   (`scale_lb 1e-4`; BC's settles at 0.024), so the policy's entropy sits below the target, the dual has no
+   attainable solution and it runs away — measured 0.73 → 1.22 → 3.98 → 8.77 → 9.60 between 14 k and 23 k
+   steps, after which the entropy term owns the actor loss and the policy goes to maximum entropy.
+   TorchRL's CQL sota sets `model.scale_lb: 0.1` for this reason, so `make_actor` grew a `scale_lb`
+   argument (default unchanged, BC/IQL untouched) and CQL passes 0.1. The temperature now decays.
+2. **The conservative penalty runs the critic away** (mitigated). Under the sota's Lagrange dual the critic
+   reached **Q ≈ -14,000** within 10 k steps; at a fixed `min_q_weight 5.0`, worse. At `min_q_weight 0.1`
+   with the dual off, `loss_cql` stays in `[-4, 1]`. That is what is committed.
+3. **Nested observation keys** (fixed, see above).
+
+Ruled out along the way: `deactivate_vmap=True` — CQL's pseudo-vmap over its 3×2 stacked Q-parameter sets
+was checked against real vmap on identical weights and agrees to five decimals.
+
+After all of that CQL is still at **0.000 success at 5 k and 10 k** gradient steps, having thrown away its
+4 k-step cloning warm-up within a thousand steps of switching to the Q objective. The reason it has no
+rescue is structural: TD3+BC's actor loss is `-lambda*Q + MSE(pi(s), a)`, so `alpha` can switch the useless
+Q gradient off; **CQL's actor loss is `alpha*log pi - Q`, with no behaviour-cloning term at all** beyond the
+finite warm-up. There is no knob. CQL needs a dataset with action diversity, and tuning it further on this
+one would be tuning it towards BC.
+
+## Earlier single-seed runs: 150 k steps, seed 0
+
+These are the first runs in this folder and are **not** part of the four-algorithm grid above: a longer
+budget (150 k), a single seed, and two of them on image-only inputs. They are what established that
+proprioception, not the cameras, was the bottleneck, and they are kept for that.
 
 **Only deployable observations.** Every row below shares the protocol above (150 k steps, batch 256, eval
 every 10 k over 128 envs, seed 0, W&B group `offline_rl`) and uses only observations a real cell can
@@ -96,7 +263,7 @@ Teacher (privileged state, cameras off, same evaluation protocol): **0.984** suc
 
 ![Offline-RL students on deployable observations (image / image+proprio), by demonstration data](../../docs/experiments/offline_rl/success_rate_by_data.png)
 
-### Deployable — image only; image + proprioception
+#### Deployable — image only; image + proprioception
 
 | Algorithm | Run | Inputs | Data | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|---|---|
@@ -106,8 +273,6 @@ Teacher (privileged state, cameras off, same evaluation protocol): **0.984** suc
 | IQL | `students/iql_expert_only` | image | expert-only | 0.813 @ 90 k | 0.797 | 0.748 | 1.82 h | [d2ia8nor](https://wandb.ai/sebastian-dittert/food_robot/runs/d2ia8nor) |
 | BC | `students/bc_expert_only_proprio` | image+proprio | expert-only | **0.984 @ 100 k** | 0.953 | **0.955** | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
 | IQL | `students/iql_expert_only_proprio` | image+proprio | expert-only | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
-| CQL | *planned* | | | | | | | |
-| TD3+BC | *planned* | | | | | | | |
 
 Success rate per evaluation, 128 episodes each (binomial standard error around 0.6 is about 0.043 — the
 `±0.04` referenced throughout this file):
@@ -142,10 +307,11 @@ from the wrist camera before it can even attempt the grasp.
 (the best checkpoint beats the final one by several points in most runs here); average several evaluations
 per point or use more evaluation envs so the selection is not chasing noise; add the `noisy_v3c` tier for
 state coverage; and give the actor a learned, state-dependent scale so it can stay stochastic where the data
-is ambiguous. CQL and TD3+BC come next and inherit this protocol unchanged — run them with the
-image+proprio inputs, since that is now the group worth shipping.
+is ambiguous. The first two of those (checkpoint selection by evaluation, more evaluation envs) are still
+open; the four-algorithm grid above took the image+proprio inputs these runs identified as the group worth
+shipping.
 
-### Borderline — not run, flagged for a future variant
+#### Borderline — not run, flagged for a future variant
 
 Nothing has been trained in this group yet. `belt` (the bowl's pose on the conveyor) is stored as
 simulator-only state in this dataset, but in a real cell it could plausibly come from a belt encoder or a
@@ -153,7 +319,7 @@ fixed overhead camera rather than from privileged simulator state. `image + prop
 therefore be a legitimate deployable variant to try next — unlike `privileged` (food pose, orientation,
 grasp flag), which has no real-robot equivalent and is out of scope here.
 
-## Headline: how much of the gap to the teacher is closed, and by what
+### Headline: how much of the gap to the teacher is closed, and by what
 
 The best **deployable** student, `iql_expert_only_proprio` (image+proprio, expert-only data), reaches
 **0.992 at its best checkpoint — slightly above the teacher's own 0.984** — and `bc_expert_only_proprio`
@@ -170,14 +336,14 @@ feel where its own joints and gripper are, the image only have to supply what th
 food and the bowl are. The teacher's 0.984 is not, in practice, out of reach for a policy that sees only what
 a real robot controller could give it.
 
-## Ablations: data quality and observation access
+### Ablations: data quality and observation access
 
 Two ablations on top of the two image-only baselines above, same protocol (150 k steps, batch 256, eval
 every 10 k over 128 envs, same seed): **data quality** — image-only inputs, `expert_v3c` alone (1 M frames)
 instead of expert+medium — and **observation access** — expert-only data, inputs extended from image-only
 to image + `proprio`.
 
-### Data quality: does the medium tier help?
+#### Data quality: does the medium tier help?
 
 | Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|
@@ -211,7 +377,7 @@ image only), this gap between the two data tiers is entirely a data-quality effe
 one; see below for how much of the *remaining* ~17-19 points is the camera-only bottleneck rather than the
 algorithm.
 
-### Observation access: how much of the gap is the camera bottleneck?
+#### Observation access: how much of the gap is the camera bottleneck?
 
 Same `expert_v3c` data as the expert-only baselines, but `network.in_keys` extended from image-only to
 `[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]` via `pickplace.keys.expand_in_keys`. `proprio` is the
@@ -241,8 +407,11 @@ Create `pipeline/2_1_offline_rl/<algo>/{train.py,utils.py,config.yaml}`:
   enforces the rest).
 * `utils.py` — `make_algo(cfg, obs_shapes, obs_keys, action_dim, device)` returning an object with
   `.policy` (the module that is evaluated and checkpointed), `.update(batch) -> {name: scalar}` and
-  `.state_dict()`. Build the networks with `pickplace.offline.make_actor` / `make_qvalue` / `make_value` so
-  the architecture stays identical.
+  `.state_dict()`. Build the networks with `pickplace.offline.make_actor` (or
+  `make_deterministic_actor`, if the loss wants actions rather than a distribution) / `make_qvalue` /
+  `make_value` so the architecture stays identical. Every scalar `update` returns is averaged over
+  `log_interval` steps, so a term the algorithm only computes every *n*th step (TD3+BC's actor) has to be
+  re-reported on the steps in between or its logged mean is off by a factor of *n*.
 * `train.py` — copy another algorithm's; it only launches the Isaac app and hands `make_algo` to
   `runner.train`.
 * Add the algorithm to the results table and to the smoke test's parametrization.

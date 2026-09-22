@@ -392,6 +392,208 @@ def make_value(shapes, obs_keys, network_cfg, device) -> ValueOperator:
 
 
 # --------------------------------------------------------------------------------------------------
+# Evaluation-time observation perturbations (simulator-free)
+# --------------------------------------------------------------------------------------------------
+
+#: Images (camera views and shards alike) carry values in [0, 255], whatever their dtype.
+IMAGE_MAX = 255.0
+
+#: Which physical quantity each ``proprio`` leaf carries, i.e. which noise scale applies to it.
+#: ``ee_quat`` (a unit quaternion — perturbing it needs a rotation, not an additive sigma) and
+#: ``last_action`` (the policy's own previous output, not a sensor reading) are deliberately absent.
+PROPRIO_NOISE_FIELDS: dict[str, str] = {
+    "joint_pos_rel": "joint_pos",
+    "gripper_pos": "joint_pos",
+    "joint_vel_rel": "joint_vel",
+    "ee_pos": "ee_pos",
+}
+
+
+class ObservationPerturbation:
+    """Degrade an observation *after* the env produced it and *before* the policy sees it.
+
+    The simulation is untouched: this only rewrites the tensordict handed to the policy (see
+    ``evaluate_student``'s ``perturb=`` argument), so it measures how robust a *trained* policy is to a
+    sensor that is noisier than the one it was trained on. Nothing here needs a simulator.
+
+    Every knob defaults to its identity value, and a perturbation whose knobs are all at their defaults
+    (``is_noop``) returns the input tensordict unchanged — severity 0 is an exact no-op, not "noise with
+    sigma 0".
+
+    Image knobs act on the image observations (any 3-D key, in [0, 255] whatever the dtype) and are applied
+    in this order, with the result clamped back into [0, 255] and cast back to the input dtype:
+
+    * ``image_noise`` — additive Gaussian, sigma in [0, 255] units (sensor read noise).
+    * ``image_gain`` / ``image_offset`` — ``gain * x + offset``, i.e. contrast and brightness.
+    * ``blur_sigma`` — separable Gaussian blur with reflect padding, kernel ``blur_kernel`` (odd; defaults
+      to ``2 * ceil(2 * sigma) + 1``) — defocus.
+    * ``occlusion`` — a black square patch covering that fraction of the image area, on the cameras named
+      by ``occlusion_keys`` (leaf names, default: every image key). The patch position is drawn **once per
+      sub-env** on first use and then held fixed for the whole evaluation: a static occluder (dirt on the
+      lens, a fixture in the way), not a patch that flickers to a new place every control step.
+
+    Proprio knobs add Gaussian noise to the ``proprio`` leaves listed in ``PROPRIO_NOISE_FIELDS``, in
+    physical units: ``joint_pos_sigma`` rad on joint positions and the gripper opening, ``joint_vel_sigma``
+    rad/s on joint velocities, ``ee_pos_sigma`` m on the end-effector position.
+
+    Randomness comes from a dedicated per-device ``torch.Generator``, so perturbing does not advance the
+    global RNG and the sequence of episodes an evaluation sees is identical across conditions.
+    """
+
+    def __init__(
+        self,
+        image_keys: Sequence = (),
+        proprio_keys: Sequence = (),
+        *,
+        name: str = "clean",
+        image_noise: float = 0.0,
+        image_gain: float = 1.0,
+        image_offset: float = 0.0,
+        blur_sigma: float = 0.0,
+        blur_kernel: int = 0,
+        occlusion: float = 0.0,
+        occlusion_keys: Sequence | None = None,
+        joint_pos_sigma: float = 0.0,
+        joint_vel_sigma: float = 0.0,
+        ee_pos_sigma: float = 0.0,
+        seed: int = 0,
+    ):
+        self.name = str(name)
+        self.image_keys = [as_key(k) for k in image_keys]
+        self.proprio_keys = [as_key(k) for k in proprio_keys]
+        self.image_noise = float(image_noise)
+        self.image_gain = float(image_gain)
+        self.image_offset = float(image_offset)
+        self.blur_sigma = float(blur_sigma)
+        self.blur_kernel = int(blur_kernel) or (2 * math.ceil(2 * self.blur_sigma) + 1 if self.blur_sigma else 0)
+        if self.blur_kernel and self.blur_kernel % 2 == 0:
+            raise ValueError(f"blur_kernel must be odd, got {self.blur_kernel}.")
+        self.occlusion = float(occlusion)
+        self.occlusion_keys = (
+            self.image_keys if occlusion_keys is None
+            else [k for k in self.image_keys if k[-1] in {as_key(o)[-1] for o in occlusion_keys}]
+        )
+        self.sigmas = {"joint_pos": float(joint_pos_sigma), "joint_vel": float(joint_vel_sigma),
+                       "ee_pos": float(ee_pos_sigma)}
+        self.noisy_proprio_keys = [k for k in self.proprio_keys
+                                   if self.sigmas.get(PROPRIO_NOISE_FIELDS.get(k[-1], ""), 0.0) > 0.0]
+        self.seed = int(seed)
+        self._generators: dict[torch.device, torch.Generator] = {}
+        self._patches: dict[tuple, torch.Tensor] = {}
+
+    # -- introspection -----------------------------------------------------------------------------
+
+    @property
+    def perturbs_images(self) -> bool:
+        return bool(self.image_keys) and bool(
+            self.image_noise > 0.0 or self.image_gain != 1.0 or self.image_offset != 0.0
+            or (self.blur_sigma > 0.0 and self.blur_kernel > 1) or (self.occlusion > 0.0 and self.occlusion_keys)
+        )
+
+    @property
+    def is_noop(self) -> bool:
+        return not self.perturbs_images and not self.noisy_proprio_keys
+
+    def summary(self) -> dict:
+        """The knobs that are actually doing something, for a result record."""
+        knobs = {"image_noise": self.image_noise, "image_gain": self.image_gain,
+                 "image_offset": self.image_offset, "blur_sigma": self.blur_sigma,
+                 "blur_kernel": self.blur_kernel, "occlusion": self.occlusion,
+                 **{f"{q}_sigma": s for q, s in self.sigmas.items()}}
+        defaults = {"image_gain": 1.0}
+        active = {k: v for k, v in knobs.items() if v != defaults.get(k, 0.0)}
+        if self.occlusion > 0.0:
+            active["occlusion_keys"] = [k[-1] for k in self.occlusion_keys]
+        return {"name": self.name, **active}
+
+    # -- internals ---------------------------------------------------------------------------------
+
+    def _generator(self, device: torch.device) -> torch.Generator:
+        gen = self._generators.get(device)
+        if gen is None:
+            gen = torch.Generator(device=device).manual_seed(self.seed)
+            self._generators[device] = gen
+        return gen
+
+    def _randn_like(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.randn(x.shape, generator=self._generator(x.device), device=x.device, dtype=torch.float32)
+
+    def _blur(self, x: torch.Tensor) -> torch.Tensor:
+        """Separable Gaussian blur of an ``(N, H, W, C)`` float image, reflect-padded."""
+        k, radius = self.blur_kernel, self.blur_kernel // 2
+        grid = torch.arange(k, device=x.device, dtype=torch.float32) - radius
+        weight = torch.exp(-0.5 * (grid / self.blur_sigma) ** 2)
+        weight = weight / weight.sum()
+        n, h, w, c = x.shape
+        img = x.permute(0, 3, 1, 2)  # NCHW
+        for shape in ((1, 1, 1, k), (1, 1, k, 1)):
+            pad = (radius, radius, 0, 0) if shape[-1] == k else (0, 0, radius, radius)
+            img = nn.functional.conv2d(nn.functional.pad(img, pad, mode="reflect"),
+                                       weight.view(*shape).expand(c, 1, *shape[2:]), groups=c)
+        return img.permute(0, 2, 3, 1)
+
+    def _patch(self, key: tuple, x: torch.Tensor) -> torch.Tensor:
+        """A fixed-per-sub-env boolean mask of the occluded pixels, ``(N, H, W, 1)``."""
+        n, h, w = x.shape[0], x.shape[-3], x.shape[-2]
+        cached = self._patches.get((key, n, h, w))
+        if cached is not None:
+            return cached
+        side_h = max(1, int(round(math.sqrt(self.occlusion) * h)))
+        side_w = max(1, int(round(math.sqrt(self.occlusion) * w)))
+        gen = self._generator(x.device)
+        top = torch.randint(0, h - side_h + 1, (n, 1, 1), generator=gen, device=x.device)
+        left = torch.randint(0, w - side_w + 1, (n, 1, 1), generator=gen, device=x.device)
+        rows = torch.arange(h, device=x.device).view(1, h, 1)
+        cols = torch.arange(w, device=x.device).view(1, 1, w)
+        mask = ((rows >= top) & (rows < top + side_h) & (cols >= left) & (cols < left + side_w)).unsqueeze(-1)
+        self._patches[(key, n, h, w)] = mask
+        return mask
+
+    def _degrade_image(self, key: tuple, x: torch.Tensor) -> torch.Tensor:
+        out = x.float()
+        if self.image_noise > 0.0:
+            out = out + self.image_noise * self._randn_like(out)
+        if self.image_gain != 1.0 or self.image_offset != 0.0:
+            out = self.image_gain * out + self.image_offset
+        if self.blur_sigma > 0.0 and self.blur_kernel > 1:
+            out = self._blur(out)
+        if self.occlusion > 0.0 and key in self.occlusion_keys:
+            out = out.masked_fill(self._patch(key, out), 0.0)
+        out = out.clamp(0.0, IMAGE_MAX)
+        return out.round().to(x.dtype) if not x.dtype.is_floating_point else out.to(x.dtype)
+
+    # -- application -------------------------------------------------------------------------------
+
+    def __call__(self, td: TensorDictBase) -> TensorDictBase:
+        """Return ``td`` with the perturbed observations (a shallow copy; ``td`` itself is untouched)."""
+        if self.is_noop:
+            return td
+        out = td.copy()
+        if self.perturbs_images:
+            for key in self.image_keys:
+                out.set(key, self._degrade_image(key, td.get(key)))
+        for key in self.noisy_proprio_keys:
+            x = td.get(key)
+            sigma = self.sigmas[PROPRIO_NOISE_FIELDS[key[-1]]]
+            out.set(key, (x.float() + sigma * self._randn_like(x)).to(x.dtype))
+        return out
+
+
+def make_perturbation(cfg: Mapping, obs_keys: Sequence, obs_shapes: Sequence, seed: int = 0
+                      ) -> ObservationPerturbation:
+    """Build an :class:`ObservationPerturbation` from a plain config mapping and the policy's own keys.
+
+    ``cfg`` holds the constructor's knobs plus ``name``; keys with a 3-D ``obs_shapes`` entry are the
+    images and the rest are the vector (proprio) inputs, exactly as ``PixelNet`` splits them.
+    """
+    keys = [as_key(k) for k in obs_keys]
+    shapes = [tuple(s) for s in obs_shapes]
+    images = [k for k, s in zip(keys, shapes, strict=True) if len(s) == 3]
+    vectors = [k for k, s in zip(keys, shapes, strict=True) if len(s) != 3]
+    return ObservationPerturbation(images, vectors, seed=seed, **{k: v for k, v in dict(cfg).items()})
+
+
+# --------------------------------------------------------------------------------------------------
 # Online evaluation of a student (needs a launched Isaac app)
 # --------------------------------------------------------------------------------------------------
 
@@ -419,11 +621,15 @@ _EVAL_KEYS = ["episode_reward", "episode_reward_terms", "step_count",
               ("next", "done"), ("next", "reward"), ("next", "reward_terms"), ("next", "outcome")]
 
 
-def evaluate_student(policy, env, prefix: str = "eval") -> dict[str, float]:
+def evaluate_student(policy, env, prefix: str = "eval", perturb=None) -> dict[str, float]:
     """Run ``policy`` deterministically for ``max_episode_length + 1`` steps; score each env's first episode.
 
     Same protocol as ``pipeline/0_state_teacher/evaluate.py`` (which scores the teacher), so student and
     teacher numbers are directly comparable. Returns ``pickplace.training.first_episode_metrics``.
+
+    ``perturb`` (an :class:`ObservationPerturbation`, or any ``td -> td``) degrades the observation between
+    the env and the policy: the policy acts on ``perturb(td)`` but the env keeps stepping the clean ``td``,
+    so only the policy's *input* is degraded and the simulation is bit-for-bit the same run.
     """
     from torchrl.envs import ExplorationType, set_exploration_type
 
@@ -436,7 +642,10 @@ def evaluate_student(policy, env, prefix: str = "eval") -> dict[str, float]:
     policy.eval()
     with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
         for _ in range(steps):
-            td = policy(td)
+            if perturb is None:
+                td = policy(td)
+            else:
+                td.set("action", policy(perturb(td)).get("action"))
             stepped, td = env.step_and_maybe_reset(td)
             records.append(stepped.select(*_EVAL_KEYS, strict=False).clone())
     if was_training:

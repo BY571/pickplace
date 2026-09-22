@@ -376,3 +376,152 @@ def test_the_actor_scale_floor_is_honoured():
             net.module[0].module.scale.state_independent_scale.fill_(-20.0)  # ask for a collapsed scale
         assert free.get_dist(batch.clone()).scale.max() < 0.1
         assert floored.get_dist(batch.clone()).scale.min() >= 0.1
+
+
+# --------------------------------------------------------------------------------------------------
+# Evaluation-time observation perturbations
+# --------------------------------------------------------------------------------------------------
+
+PERTURB_KEYS = [("pixels", "overview_rgb"), ("pixels", "wrist_rgb"),
+                ("proprio", "joint_pos_rel"), ("proprio", "joint_vel_rel"), ("proprio", "gripper_pos"),
+                ("proprio", "ee_pos"), ("proprio", "ee_quat"), ("proprio", "last_action")]
+PERTURB_SHAPES = [(16, 16, 3), (16, 16, 3), (7,), (7,), (2,), (3,), (4,), (7,)]
+
+
+def _perturb_batch(n=5, dtype=torch.float32, hw=16):
+    """A batch shaped like the tensordict a camera env hands the student (images in [0, 255])."""
+    torch.manual_seed(0)
+    images = torch.randint(0, 256, (n, hw, hw, 3)).to(dtype)
+    td = TensorDict(
+        {"pixels": TensorDict({"overview_rgb": images, "wrist_rgb": images.clone()}, batch_size=[n]),
+         "proprio": TensorDict(
+             {"joint_pos_rel": torch.randn(n, 7), "joint_vel_rel": torch.randn(n, 7),
+              "gripper_pos": torch.randn(n, 2), "ee_pos": torch.randn(n, 3),
+              "ee_quat": torch.randn(n, 4), "last_action": torch.randn(n, 7)},
+             batch_size=[n])},
+        batch_size=[n],
+    )
+    return td
+
+
+def _perturbation(**cfg):
+    from pickplace.offline import make_perturbation
+
+    return make_perturbation(cfg, PERTURB_KEYS, PERTURB_SHAPES)
+
+
+def test_make_perturbation_splits_images_from_vectors_by_shape():
+    p = _perturbation(name="x")
+    assert p.image_keys == [("pixels", "overview_rgb"), ("pixels", "wrist_rgb")]
+    assert ("proprio", "ee_pos") in p.proprio_keys and ("pixels", "wrist_rgb") not in p.proprio_keys
+
+
+@pytest.mark.parametrize("cfg", [
+    {}, {"image_noise": 0.0}, {"image_gain": 1.0, "image_offset": 0.0}, {"blur_sigma": 0.0},
+    {"occlusion": 0.0}, {"joint_pos_sigma": 0.0, "joint_vel_sigma": 0.0, "ee_pos_sigma": 0.0},
+])
+def test_severity_zero_is_an_exact_no_op(cfg):
+    """Not "noise with sigma 0": the clean control must return the very same tensors, bit for bit."""
+    p = _perturbation(**cfg)
+    assert p.is_noop
+    td = _perturb_batch()
+    out = p(td)
+    assert out is td
+    for key in PERTURB_KEYS:
+        assert torch.equal(out.get(key), td.get(key))
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.uint8])
+@pytest.mark.parametrize("cfg", [
+    {"image_noise": 20.0}, {"image_gain": 0.8}, {"image_offset": -25.0}, {"image_offset": 25.0},
+    {"blur_sigma": 1.5, "blur_kernel": 5}, {"occlusion": 0.15},
+    {"image_noise": 5.0, "joint_pos_sigma": 0.01, "joint_vel_sigma": 0.1, "ee_pos_sigma": 0.005},
+])
+def test_perturbed_observations_keep_their_shape_dtype_and_image_range(cfg, dtype):
+    td = _perturb_batch(dtype=dtype)
+    out = _perturbation(**cfg)(td)
+    for key, shape in zip(PERTURB_KEYS, PERTURB_SHAPES):
+        assert out.get(key).shape == (td.batch_size[0], *shape)
+        assert out.get(key).dtype == td.get(key).dtype
+    for key in (("pixels", "overview_rgb"), ("pixels", "wrist_rgb")):
+        image = out.get(key).float()
+        assert image.min() >= 0.0 and image.max() <= 255.0
+
+
+@pytest.mark.parametrize("cfg,changed", [
+    ({"image_noise": 10.0}, True),
+    ({"joint_pos_sigma": 0.01}, False),
+])
+def test_only_image_knobs_touch_the_images(cfg, changed):
+    td = _perturb_batch()
+    out = _perturbation(**cfg)(td)
+    moved = not torch.equal(out.get(("pixels", "wrist_rgb")), td.get(("pixels", "wrist_rgb")))
+    assert moved is changed
+
+
+def test_proprio_noise_hits_exactly_the_sensor_entries_at_the_right_scale():
+    """Joint angles, joint speeds and the end-effector position each get their own physical sigma; the
+    quaternion and the policy's own last action are not sensor readings and must be left alone."""
+    n = 20000
+    td = _perturb_batch(n, hw=2)
+    out = _perturbation(joint_pos_sigma=0.01, joint_vel_sigma=0.1, ee_pos_sigma=0.005)(td)
+    expected = {"joint_pos_rel": 0.01, "gripper_pos": 0.01, "joint_vel_rel": 0.1, "ee_pos": 0.005,
+                "ee_quat": 0.0, "last_action": 0.0}
+    for leaf, sigma in expected.items():
+        delta = out.get(("proprio", leaf)) - td.get(("proprio", leaf))
+        if sigma == 0.0:
+            assert torch.equal(delta, torch.zeros_like(delta)), leaf
+        else:
+            assert delta.std().item() == pytest.approx(sigma, rel=0.05), leaf
+            assert abs(delta.mean().item()) < 0.05 * sigma, leaf
+
+
+def test_image_noise_has_the_requested_sigma_away_from_the_clipping_range():
+    td = _perturb_batch(400, hw=8)
+    td.set(("pixels", "wrist_rgb"), torch.full_like(td.get(("pixels", "wrist_rgb")), 128.0))
+    out = _perturbation(image_noise=10.0)(td)
+    delta = out.get(("pixels", "wrist_rgb")) - 128.0
+    assert delta.std().item() == pytest.approx(10.0, rel=0.05)
+
+
+def test_gain_and_offset_are_the_affine_map_they_claim_to_be():
+    td = _perturb_batch()
+    td.set(("pixels", "wrist_rgb"), torch.full_like(td.get(("pixels", "wrist_rgb")), 100.0))
+    out = _perturbation(image_gain=0.8, image_offset=-25.0)(td)
+    assert torch.allclose(out.get(("pixels", "wrist_rgb")), torch.full((5, 16, 16, 3), 55.0))
+
+
+def test_blur_preserves_the_mean_and_flattens_a_spike():
+    td = _perturb_batch(1)
+    image = torch.zeros(1, 16, 16, 3)
+    image[0, 8, 8, :] = 255.0
+    td.set(("pixels", "wrist_rgb"), image)
+    out = _perturbation(blur_sigma=1.0, blur_kernel=5)(td).get(("pixels", "wrist_rgb"))
+    assert out[0, 8, 8, 0] < 255.0 and out[0, 7, 8, 0] > 0.0
+    assert out.sum().item() == pytest.approx(image.sum().item(), rel=1e-3)
+
+
+def test_an_even_blur_kernel_is_rejected():
+    from pickplace.offline import ObservationPerturbation
+
+    with pytest.raises(ValueError, match="odd"):
+        ObservationPerturbation([("pixels", "wrist_rgb")], blur_sigma=1.0, blur_kernel=4)
+
+
+@pytest.mark.parametrize("fraction", [0.05, 0.15])
+def test_occlusion_blacks_out_about_the_requested_area_and_stays_put(fraction):
+    td = _perturb_batch(64)
+    td.set(("pixels", "wrist_rgb"), torch.full_like(td.get(("pixels", "wrist_rgb")), 200.0))
+    p = _perturbation(occlusion=fraction, occlusion_keys=["wrist_rgb"])
+    out = p(td).get(("pixels", "wrist_rgb"))
+    black = (out == 0.0).float().mean(dim=(1, 2, 3))
+    side = max(1, round((fraction ** 0.5) * 16))
+    assert torch.allclose(black, torch.full_like(black, side * side / 256.0))
+    assert black.std() == 0.0  # one patch of the same size in every sub-env
+    assert torch.equal(p(td).get(("pixels", "wrist_rgb")), out)  # static occluder, not a flickering one
+    assert torch.equal(p(td).get(("pixels", "overview_rgb")), td.get(("pixels", "overview_rgb")))
+
+
+def test_the_summary_records_only_the_active_knobs():
+    p = _perturbation(name="combined_mid", image_noise=5.0, joint_pos_sigma=0.01)
+    assert p.summary() == {"name": "combined_mid", "image_noise": 5.0, "joint_pos_sigma": 0.01}

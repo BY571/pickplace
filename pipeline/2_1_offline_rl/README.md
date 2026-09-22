@@ -225,6 +225,50 @@ CQL does not learn here at all. **The next experiment is a dataset question, not
 re-run this grid on data with action noise (`noisy_v3c`, or a re-recorded expert with `noise_sigma > 0`) and
 see whether IQL, CQL and TD3+BC can finally beat cloning instead of merely matching it.**
 
+### Does the student beat its teacher?
+
+The grid above (128-episode evaluations) puts IQL's best *saved* checkpoint at 0.961 and the single best
+*evaluation point* anywhere in the grid at 1.000 (seed 0, step 70 k — an evaluation-only point; no checkpoint
+was saved at 70 k, checkpoints land every 50 k). Either way it reads as "at or above the teacher's 0.984",
+but 128 episodes only pins success rate down to about ±0.019 (95% binomial standard error) — inside the size
+of that gap. Settling it needs a bigger sample.
+
+**Protocol.** Re-evaluated three checkpoints at **1000 episodes** each, deterministic policy,
+`max_episode_length + 1` steps, first finished episode per env scored — the protocol used throughout this
+file and `pipeline/0_state_teacher/evaluate.py`:
+
+* **Teacher** (`teachers/teacher_v3c_20260920T120408Z/checkpoints/ppo_teacher_final.pt`, its own state
+  observations, `pipeline/0_state_teacher/evaluate.py`): **one pass at `num_envs=1000`**. State-only
+  evaluation is cheap (21.5 s for all 1000 envs), so there was no reason to split it.
+* **BC** (`students/bc_expert_proprio_s0/checkpoints/bc_final.pt`) and **IQL**
+  (`students/iql_expert_proprio_s1/checkpoints/iql_final.pt`) — each the best *saved* checkpoint of its best
+  seed (the manifests hold every checkpoint's own eval; see the per-seed table above for how the saved
+  checkpoints compare): **two independent passes of 500 fresh camera envs each (seeds 0 and 1), pooled by
+  exact success count.** This repo's convention (`benchmark.py`) is one Isaac process per measurement rather
+  than growing one process's env count arbitrarily, and a 1000-env camera pass was never exercised anywhere
+  else in the codebase, so repeat-and-pool was the cleaner choice here (the teacher's single-pass state env
+  has no such precedent to worry about either way). `pipeline/2_1_offline_rl/evaluate.py` is a new, small
+  standalone script for this — nothing before it could evaluate one student checkpoint outside a training
+  run.
+
+| | Episodes | Successes | Success rate | 95% CI (Wald) |
+|---|---|---|---|---|
+| Teacher | 1000 | 982 | 0.982 | [0.974, 0.990] |
+| BC (best checkpoint, best seed) | 1000 | 983 | 0.983 | [0.975, 0.991] |
+| IQL (best checkpoint, best seed) | 1000 | 947 | 0.947 | [0.933, 0.961] |
+
+**Verdict: no — the 128-episode "IQL beats the teacher" reading was noise, and at this sample size IQL is
+actually a bit worse.** Teacher vs. BC: 0.982 vs. 0.983, a two-proportion z-test gives **z = −0.17
+(p ≈ 0.86)** — indistinguishable, exactly the "closes 100% of the gap" reading the smaller samples already
+supported. Teacher vs. IQL: 0.982 vs. 0.947, **z = 4.23 (p < 0.0001)** — significant, and in the *opposite*
+direction from the 128-episode grid: IQL's confidence interval sits entirely below the teacher's, not above
+it. The likely explanation is visible in the per-seed table above: IQL's evaluation curve swings by several
+points step to step (late-stability sd 0.025, same as BC's, but on a noisier climb — seed 0's own history
+goes 1.000 @ 70 k then back down to 0.945 by its final checkpoint), so a single 128-episode point anywhere
+near the top of that swing reads as "beats the teacher" without the checkpoint actually being better on
+average. **BC, not IQL, is the one that genuinely matches its teacher — and it does so at a third of the
+training wall clock.**
+
 ### CQL — parked, not part of the comparison
 
 **Parked at the user's decision, not abandoned because it was hard.** The code

@@ -1,10 +1,21 @@
-"""Continuous-operation demo and evaluation of a state teacher (1 env, cameras on, deterministic policy).
+"""Continuous-operation demo and evaluation of a teacher OR offline-RL student (1 env, cameras on, deterministic).
 
 A production line instead of episodes: ``bowls`` pallets circulate on the belt (a pallet that reaches the end is
 written back to the entry with its bowl emptied), the supply tray is refilled from a pool of spare food items, and
-the robot is never reset. The trained teacher runs unchanged: before every policy call its bowl and food
-observations are rewritten to show exactly one bowl (the target) and one food item (the active one), computed
-by the env's own observation terms, as in training.
+the robot is never reset. The trained policy runs unchanged: before every policy call the bowl and food
+observations *a state policy reads* are rewritten to show exactly one bowl (the target) and one food item (the
+active one), computed by the env's own observation terms, as in training. A camera student never reads those
+groups (it only reads images + proprio), so the rewrite is a no-op for it -- it has to find the target bowl and
+food in the pixels themselves, the same way a real camera-only cell would.
+
+Checkpoint kind is auto-detected from ``config`` (a teacher's has an ``env`` block; a student's has
+``data.shards``) or forced with ``kind=teacher|student``; the chosen kind is printed as ``DEMO_KIND``. A
+student's network, observation keys and image shapes come from the checkpoint itself
+(``pickplace.offline.make_actor`` / ``make_deterministic_actor``, as trained by
+``pipeline/2_1_offline_rl/runner.py``); its camera env is built from its own training shard's manifest, and its
+*actual* camera resolution is pinned to its trained image shape (typically 84x84) regardless of ``image=``,
+which only sets the display panel's upscale target -- exactly the distinction ``pipeline/2_1_offline_rl/render.py``
+makes.
 
 Counts: ``placed`` (the success termination's condition, in an open bowl), ``missed`` (a bowl left the reach
 zone empty), ``dropped`` (the active food fell off the table or rode off the belt end outside a bowl),
@@ -13,8 +24,8 @@ zone empty), ``dropped`` (the active food fell off the table or rode off the bel
 Usage:
     python pipeline/0_state_teacher/demo.py checkpoint=<path.pt>
     options: [seconds=120] [bowls=3] [spacing=<m>] [total_bowls=null] [home_between=true] [home_seconds=1.0]
-             [food_pool=<bowls+2>] [out=<mp4>] [image=128] [seed=0]
-Writes <out>.mp4, <out>.json (summary) and <out>_frame.png; prints ``DEMO {json}`` and ``DEMO_DONE``.
+             [food_pool=<bowls+2>] [out=<mp4>] [image=128] [seed=0] [kind=teacher|student]
+Writes <out>.mp4, <out>.json (summary) and <out>_frame.png; prints ``DEMO_KIND``, ``DEMO {json}`` and ``DEMO_DONE``.
 """
 
 import importlib.util
@@ -58,8 +69,11 @@ import torch  # noqa: E402
 from isaaclab.managers import EventTermCfg, SceneEntityCfg  # noqa: E402
 from torchrl.envs import ExplorationType, set_exploration_type  # noqa: E402
 
+from pickplace.artifacts import artifacts_root, read_json  # noqa: E402
 from pickplace.carousel import PALLET_GAP, DemoTally, park_position, pick_target  # noqa: E402
+from pickplace.datasets import shard_manifest  # noqa: E402
 from pickplace.envs import mdp  # noqa: E402
+from pickplace.offline import make_actor, make_deterministic_actor  # noqa: E402
 from pickplace.torchrl_env import make_env  # noqa: E402
 
 # Loaded by file path: with cameras enabled, Isaac Sim's bundled cv2/utils shadows `import utils`.
@@ -97,7 +111,8 @@ def overlay(img: np.ndarray, lines: list[str]) -> np.ndarray:
 def compose(scene, overview, wrist, caption: str, lines: list[str]) -> np.ndarray:
     def panel(img, name):
         big = cv2.resize(to_uint8(img), (PANEL, PANEL), interpolation=cv2.INTER_NEAREST)
-        return label(big, f"student camera: {name} ({IMAGE}x{IMAGE})")
+        h, w = NATIVE_HW  # set once the checkpoint kind is known, below
+        return label(big, f"student camera: {name} ({h}x{w} -> {IMAGE}x{IMAGE} shown)")
 
     top = overlay(label(to_uint8(scene), f"scene camera - {caption}"), lines)
     return np.concatenate([top, np.concatenate([panel(overview, "overview_rgb"), panel(wrist, "wrist_rgb")], axis=1)])
@@ -371,21 +386,50 @@ class Homing:
 
 
 # --- run ------------------------------------------------------------------------------------------------------
-env_cfg = torch.load(CHECKPOINT, map_location="cpu", weights_only=False)["config"]["env"]
-env_cfg = {**env_cfg, "num_envs": 1, "cameras": True, "render_camera": True, "seed": SEED,
-           "render_image_size": list(SCENE_HW), "image_size": [IMAGE, IMAGE],
-           "demo": {"bowls": BOWLS, "food_pool": FOOD_POOL, "spacing": SPACING}}
-env = make_env(env_cfg)
+raw_checkpoint = torch.load(CHECKPOINT, map_location="cpu", weights_only=False)
+config = raw_checkpoint["config"]
+auto_kind = "student" if "shards" in config.get("data", {}) else "teacher"
+POLICY_KIND = str(cli.get("kind", auto_kind))
+if POLICY_KIND not in ("teacher", "student"):
+    raise SystemExit("kind must be teacher or student")
+print(f"DEMO_KIND kind={POLICY_KIND} source={'cli' if cli.get('kind') else 'auto-detected'}", flush=True)
+
+demo_cfg = {"bowls": BOWLS, "food_pool": FOOD_POOL, "spacing": SPACING}
+if POLICY_KIND == "teacher":
+    NATIVE_HW = (IMAGE, IMAGE)  # the teacher never consumes the pixels obs; image= truly drives capture
+    env_cfg = {**config["env"], "num_envs": 1, "cameras": True, "render_camera": True, "seed": SEED,
+               "render_image_size": list(SCENE_HW), "image_size": [IMAGE, IMAGE], "demo": demo_cfg}
+    env = make_env(env_cfg)
+    actor = tu.load_teacher_actor(CHECKPOINT, env, env.device)
+    algo_label = "teacher"
+else:
+    manifest = read_json(CHECKPOINT.with_suffix(".json"))
+    algo_label = manifest["algorithm"]
+    obs_keys = [tuple(k) for k in raw_checkpoint["obs_keys"]]
+    obs_shapes = [tuple(s) for s in raw_checkpoint["image_shapes"]]
+    action_dim = int(raw_checkpoint["action_dim"])
+    network_cfg = OmegaConf.create(config["network"])
+    NATIVE_HW = next(s[:2] for s in obs_shapes if len(s) == 3)  # the student's own trained image shape
+    shard_name = config["data"]["shards"][0]
+    shard_path = Path(shard_name) if Path(shard_name).is_absolute() else artifacts_root() / "shards" / shard_name
+    env_cfg = {**shard_manifest(shard_path)["env"], "num_envs": 1, "cameras": True, "render_camera": True,
+               "seed": SEED, "render_image_size": list(SCENE_HW), "image_size": list(NATIVE_HW),
+               "frame_stack": 1, "demo": demo_cfg}
+    env = make_env(env_cfg)
+    make = make_deterministic_actor if algo_label == "td3_bc" else make_actor
+    actor = make(obs_shapes, obs_keys, action_dim, network_cfg, env.device)
+    actor.load_state_dict(raw_checkpoint["actor"])
+    actor.eval()
+
 u = env.base_env._env.unwrapped
 dt = u.step_dt
-actor = tu.load_teacher_actor(CHECKPOINT, env, env.device)
 
 td = env.reset()
 line = Line(u, TOTAL_BOWLS)
 line.start()
 homing = Homing(u, max(1, round(HOME_SECONDS / dt)))
 max_steps = int(round(SECONDS / dt))
-caption = f"{CHECKPOINT.parent.parent.name}/{CHECKPOINT.stem} - continuous demo"
+caption = f"{CHECKPOINT.parent.parent.name}/{CHECKPOINT.stem} - continuous demo ({algo_label})"
 OUT.parent.mkdir(parents=True, exist_ok=True)
 still = OUT.with_name(f"{OUT.stem}_frame.png")
 still_step, first_place_step = max_steps // 2, None
@@ -456,7 +500,8 @@ summary = {
         "recycle_q": round(float(u.cfg.demo_recycle_q), 4), "entry_q": round(float(u.cfg.demo_entry_q), 4),
         "food_pool": FOOD_POOL, "total_bowls": TOTAL_BOWLS, "home_between": HOME_BETWEEN,
         "home_seconds": HOME_SECONDS, "belt_speed": float(u.cfg.belt.speed), "image": IMAGE, "seed": SEED,
-        "requested_seconds": SECONDS, "step_dt": dt,
+        "requested_seconds": SECONDS, "step_dt": dt, "policy_kind": POLICY_KIND, "algorithm": algo_label,
+        "native_image_hw": list(NATIVE_HW),
     },
 }
 OUT.with_suffix(".json").write_text(json.dumps(summary, indent=2) + "\n")

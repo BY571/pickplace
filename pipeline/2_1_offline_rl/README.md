@@ -1,9 +1,10 @@
 # Stage 2.1 · offline RL from the camera shards
 
 Train a **deployable student** on the shards recorded in stage 1, with no simulator in the loop except for
-evaluation. Four algorithms live here — **BC**, **IQL**, **CQL** and **TD3+BC** — sharing one runner, one
+evaluation. Four algorithms live here — **BC**, **IQL**, **TD3+BC** and **CQL** — sharing one runner, one
 set of networks, one data mix and one evaluation protocol, so that the only thing that differs between rows
-of the results table is the objective.
+of the results table is the objective. The comparison below is the first three; **CQL is parked** (it does
+not learn on zero-action-noise data — see "CQL — parked" for the investigation and what to retry).
 
 ## The comparison protocol
 
@@ -21,8 +22,8 @@ Every algorithm in this folder gets the same everything except its loss:
 
 `tests/unit/test_offline_configs.py` asserts that the shared block of every `config.yaml` in this folder is
 identical, so the protocol cannot drift between algorithms by accident. The committed defaults are the
-image-only, expert+medium, 150 k-step protocol the first runs used; the four-algorithm comparison below
-overrides the data, the inputs and the budget on the command line, identically for every algorithm.
+image-only, expert+medium, 150 k-step protocol the first runs used; the comparison below overrides the
+data, the inputs and the budget on the command line, identically for every algorithm.
 
 **The student has to infer arm and gripper state from pixels.** Nothing in its input says where the joints
 are, whether the gripper is open or whether the food is held — that has to come out of the wrist view (the
@@ -39,13 +40,16 @@ difference. Defaults come from TorchRL's own `sota-implementations` configs; the
 |---|---|---|
 | **BC** | maximise the log-probability of the dataset action under the TanhNormal actor | none beyond the optimizer |
 | **IQL** | expectile value loss + advantage-weighted policy (`IQLLoss`) | `expectile 0.7`, `temperature 3.0`, twin Q, `target_tau 0.005` |
-| **CQL** | SAC actor + a conservative log-sum-exp penalty on out-of-distribution actions (`CQLLoss`) | `temperature 1.0`, `with_lagrange true` / `lagrange_thresh 5.0`, `num_random 2`, `policy_eval_start 4_000`, entropy `alpha` learned from 1.0 |
-| **TD3+BC** | TD3 with the actor's Q term rescaled so a BC term stays comparable to it (`TD3BCLoss`) | `alpha 2.5`, `policy_noise 0.2`, `noise_clip 0.5`, `policy_update_delay 2`, twin Q, `target_tau 0.005` |
+| **TD3+BC** | TD3 with the actor's Q term rescaled so a BC term stays comparable to it (`TD3BCLoss`) | `alpha 0.025` (measured, not copied), `policy_noise 0.2`, `noise_clip 0.5`, `policy_update_delay 2`, twin Q, `target_tau 0.005` |
+| CQL *(parked)* | SAC actor + a conservative log-sum-exp penalty on out-of-distribution actions (`CQLLoss`) | `temperature 1.0`, `num_random 2`, `min_q_weight 0.1` with the Lagrange dual off, `actor_scale_lb 0.1`, `policy_eval_start 4_000` |
 
-**CQL.** `temperature 1.0`, `with_lagrange true` with `lagrange_thresh 5.0`, `max_q_backup false` and
-`deterministic_backup false` are exactly `sota-implementations/cql/offline_config.yaml`. The entropy
-weight (`alpha`) is *not* pinned: as in the sota script it is learned from `alpha_init 1.0` against
-`target_entropy "auto"` (= −action_dim), which is why the config has no `alpha` entry. Two deviations:
+**CQL** *(parked — kept here so the config is reproducible).* `temperature 1.0`, `max_q_backup false` and
+`deterministic_backup false` are `sota-implementations/cql/offline_config.yaml`. The entropy weight
+(`alpha`) is not pinned: as in the sota script it is learned from `alpha_init 1.0` against
+`target_entropy "auto"` (= −action_dim), which is why the config has no `alpha` entry. Four deviations, two
+of them forced by failures documented under "CQL — parked": `with_lagrange false` with
+`min_q_weight 0.1` (the dual let the critic run away to Q ≈ −14,000), `actor_scale_lb 0.1` (matching the
+sota's `model.scale_lb`, without which the entropy temperature diverges), and:
 
 * **`num_random 2`, not 10.** The conservative penalty evaluates `3 × num_random × batch` state-action
   pairs through both Q nets on every gradient step. With an MLP over a state vector — the sota's setting —
@@ -53,7 +57,7 @@ weight (`alpha`) is *not* pinned: as in the sota script it is learned from `alph
   of the run. Measured on the Spark at batch 256 with image+proprio inputs: **8.4 / 5.2 / ~2.4 gradient
   steps per second at `num_random` 2 / 4 / 10**, i.e. **3.3 h / 5.3 h / ~11.5 h per 100 k-step run**,
   against 22 steps/s for IQL and 35 for TD3+BC. `num_random 2` is the largest value that keeps three seeds
-  inside the grid's wall clock, and it is the one number to raise first if CQL ever looks under-conservative.
+  inside the grid's wall clock, and it is the one number to raise first when CQL is picked up again.
 * **`policy_eval_start 4_000`, not 40 000.** The sota warm-starts the actor on the behaviour-cloning term
   for the first 40 k of its 1 M gradient steps; 4 k is the same 4% of our 100 k budget.
 
@@ -63,7 +67,7 @@ about ten times the gradient norm for the same fit on this reward scale.
 **TD3+BC.** `policy_noise 0.2`, `noise_clip 0.5`, `policy_update_delay 2` and `target_tau 0.005` (the
 sota's `target_update_polyak 0.995`) are `sota-implementations/td3_bc/config.yaml` unchanged — the paper's
 values. Again `smooth_l1` instead of `l2`. The sota's `adam_eps 1e-4` is *not* adopted: keeping one
-optimizer across the four algorithms matters more here than one algorithm's epsilon. TD3+BC is the one
+optimizer across the algorithms matters more here than one algorithm's epsilon. TD3+BC is the one
 algorithm that cannot use the shared stochastic actor — `TD3BCLoss` reads `action` straight out of the
 actor and adds the target-policy smoothing noise itself — so it uses
 `pickplace.offline.make_deterministic_actor`: the same `PixelNet` body with a tanh head instead of a
@@ -160,9 +164,9 @@ checkpoint + evaluation) with
 
 W&B project `food_robot`, group `offline_rl`.
 
-## Results: the four-algorithm, three-seed comparison
+## Results: the three-algorithm, three-seed comparison
 
-**One protocol, four objectives, three seeds.** `expert_v3c` only,
+**One protocol, three objectives, three seeds.** `expert_v3c` only,
 `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]` (the deployable set: both cameras plus
 the robot's own proprioception), 100,000 gradient steps, batch 256, evaluation every 10 k over 128 fresh
 camera envs, seeds 0/1/2, W&B group `offline_rl`, runs named `<algo>_expert_proprio_s<seed>`. Everything was
@@ -180,7 +184,9 @@ p = 0.95 over 128 episodes), so **differences under about 0.04 are not differenc
 | **IQL** | **0.990 ± 0.012** | **0.953 ± 0.008** | **0.956 ± 0.011** | 27 k ± 15 k | 0.025 | 1.22 h | [29pbjq2u](https://wandb.ai/sebastian-dittert/food_robot/runs/29pbjq2u) · [hb56w7uy](https://wandb.ai/sebastian-dittert/food_robot/runs/hb56w7uy) · [9uup6qxu](https://wandb.ai/sebastian-dittert/food_robot/runs/9uup6qxu) |
 | **TD3+BC** (`alpha 0.025`) | 0.958 ± 0.008 | 0.922 ± 0.027 | 0.919 ± 0.019 | 63 k ± 5 k | 0.036 | 0.83 h | [eclg2kb9](https://wandb.ai/sebastian-dittert/food_robot/runs/eclg2kb9) · [u6nau6bv](https://wandb.ai/sebastian-dittert/food_robot/runs/u6nau6bv) · [9bz3kwr5](https://wandb.ai/sebastian-dittert/food_robot/runs/9bz3kwr5) |
 | TD3+BC at the paper's `alpha 2.5` | 0.219 | 0.109 | 0.102 | never | 0.090 | 0.83 h | [gc76ywhn](https://wandb.ai/sebastian-dittert/food_robot/runs/gc76ywhn) (seed 0 only — see above) |
-| **CQL** | *does not learn on this data — see below* | | | | | 3.3 h | |
+
+CQL is **not** in this comparison; it is parked, and the investigation is recorded at the end of this
+section.
 
 Per-seed numbers (best @ step / final / last-5 mean / last-5 sd / steps to 0.90):
 
@@ -206,7 +212,7 @@ TD3+BC is also the least steady late (0.036 vs 0.025) and lowest on every succes
 0.919 ± 0.019 against BC's 0.944 ± 0.016 is the only success gap that even approaches significance. With a
 ceiling this high, "how fast" is the honest discriminator, and there BC wins outright.
 
-**What this comparison really measured.** Given that the four objectives land within noise of each other (or
+**What this comparison really measured.** Given that the objectives land within noise of each other (or
 below), the useful conclusion is not about the objectives at all: on **zero-action-noise expert
 demonstrations** there is nothing for a value-based method to add. `expert_v3c` was recorded with
 `noise_sigma = 0.0` from a single deterministic teacher, so every state in it was visited with exactly one
@@ -219,9 +225,13 @@ CQL does not learn here at all. **The next experiment is a dataset question, not
 re-run this grid on data with action noise (`noisy_v3c`, or a re-recorded expert with `noise_sigma > 0`) and
 see whether IQL, CQL and TD3+BC can finally beat cloning instead of merely matching it.**
 
-### CQL: investigated, two misconfigurations fixed, still does not learn
+### CQL — parked, not part of the comparison
 
-CQL is the one row this grid could not fill honestly. Three defects were found and two of them fixed:
+**Parked at the user's decision, not abandoned because it was hard.** The code
+(`cql/{train.py,utils.py,config.yaml}`), its unit tests and its place in the simulator smoke test all stay,
+so it can be picked up again on a dataset with action diversity. What was found, for whoever does that:
+
+Three defects, two of them fixed:
 
 1. **The SAC entropy temperature diverges** (fixed). `CQLLoss` learns it against
    `target_entropy = -action_dim`, but the shared actor's scale collapses while cloning
@@ -238,8 +248,9 @@ CQL is the one row this grid could not fill honestly. Three defects were found a
 Ruled out along the way: `deactivate_vmap=True` — CQL's pseudo-vmap over its 3×2 stacked Q-parameter sets
 was checked against real vmap on identical weights and agrees to five decimals.
 
-After all of that CQL is still at **0.000 success at 5 k and 10 k** gradient steps, having thrown away its
-4 k-step cloning warm-up within a thousand steps of switching to the Q objective. The reason it has no
+After all of that CQL is still at **0.000 success at every one of the nine evaluations of an 88 k-step
+run** (`students/cql_expert_proprio_s0`, stopped by SIGTERM once the answer was clear), having thrown away
+its 4 k-step cloning warm-up within a thousand steps of switching to the Q objective. The reason it has no
 rescue is structural: TD3+BC's actor loss is `-lambda*Q + MSE(pi(s), a)`, so `alpha` can switch the useless
 Q gradient off; **CQL's actor loss is `alpha*log pi - Q`, with no behaviour-cloning term at all** beyond the
 finite warm-up. There is no knob. CQL needs a dataset with action diversity, and tuning it further on this

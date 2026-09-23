@@ -61,9 +61,9 @@ manifest = shard_manifest("/workspace/artifacts/shards/expert_v3c")
 
 Mixing tiers and relabelling rewards belongs to stage 2, not here.
 
-## Tiers (collected 2026-09-20 from `teachers/teacher_v3c_20260920T120408Z`)
+## Tiers (collected 2026-09-20/23 from `teachers/teacher_v3c_20260920T120408Z`)
 
-All three at 84 px, `num_envs=512`, `rollout_steps=16`, 1 M frames (rounded up to 1,007,616 = 123 batches),
+All four at 84 px, `num_envs=512`, `rollout_steps=16`, 1 M frames (rounded up to 1,007,616 = 123 batches),
 in `$FOOD_ROBOT_ARTIFACTS/shards/`. Success rate is the shard's own (every episode that finished during the
 collection), not the checkpoint's evaluation.
 
@@ -72,11 +72,17 @@ collection), not the checkpoint's evaluation.
 | expert | `expert_v3c` | `ppo_teacher_final.pt` (0.984) | 0 | 0 | **0.983** | 40.1 GB | 11.4 M frames/h (317 s) |
 | medium | `medium_v3c` | `ppo_teacher_110100480.pt` (0.652) | 0 | 1 | **0.674** | 40.1 GB | 11.6 M frames/h (314 s) |
 | noisy | `noisy_v3c` | `ppo_teacher_final.pt` (0.984) | 0.2 | 2 | **0.841** | 40.1 GB | 11.2 M frames/h (323 s) |
+| beginner | `beginner_v3c` | `ppo_teacher_100139008.pt` (0.219) | 0 | 3 | **0.255** | 40.1 GB | 3.5 M frames/h (1039 s) |
 
 The tiers fail in different ways, which is the point of mixing them: the medium teacher mostly misses the bowl
-(31% `bowl_exited_zone`, mean episode length 164 steps vs the expert's 114), while the noisy expert mostly drops
-food (9.5% `food_off_table`, 5% missed). σ = 0.2 came from 80 k-frame probes of the expert checkpoint:
-σ 0.10 → 0.956, σ 0.15 → 0.916, σ 0.20 → 0.835 success. Peak host memory was 31 GB (512 envs, 84 px).
+(31% `bowl_exited_zone`, mean episode length 164 steps vs the expert's 114), the noisy expert mostly drops
+food (9.5% `food_off_table`, 5% missed), and the beginner teacher — the earliest checkpoint whose eval success
+is above 0% (the run jumps from 0% at 90 M frames to 21.9% at 100 M) — mostly reaches the bowl zone but leaves
+it before releasing (73% `bowl_exited_zone`, mean episode length 231 steps, longest of any tier). σ = 0.2 came
+from 80 k-frame probes of the expert checkpoint: σ 0.10 → 0.956, σ 0.15 → 0.916, σ 0.20 → 0.835 success. Peak
+host memory was 31 GB (512 envs, 84 px); `beginner_v3c` collected at 3.5 M frames/h instead of the usual
+~11.4 M frames/h because it ran concurrently with unrelated GPU load on the Spark (portfolio-management
+training jobs), not because of anything in `collect.py`.
 
 ## Verification
 
@@ -85,19 +91,21 @@ image content), episode structure (trajectory-id runs, done/outcome exclusivity,
 invariant), recomputed statistics vs the manifest, checkpoint provenance, and cross-tier plausibility:
 
     ./scripts/spark.sh python scripts/verify_shard.py \
-        /workspace/artifacts/shards/expert_v3c /workspace/artifacts/shards/medium_v3c /workspace/artifacts/shards/noisy_v3c
+        /workspace/artifacts/shards/expert_v3c /workspace/artifacts/shards/medium_v3c \
+        /workspace/artifacts/shards/noisy_v3c /workspace/artifacts/shards/beginner_v3c
 
 | Tier | Episodes | Success | Return | Length | Zero frames (sample) | Checkpoint sha256 | Result |
 |---|---|---|---|---|---|---|---|
 | expert_v3c | 8515 | 0.9834 | 182.46 | 114.2 | 0/200 | matches, file exists | 3/8515 done rows with 2 outcome flags set |
 | medium_v3c | 5818 | 0.6741 | 163.52 | 164.3 | 0/200 | matches, file exists | clean |
 | noisy_v3c | 6052 | 0.8409 | 177.56 | 158.3 | 0/200 | matches, file exists | 6/6052 done rows with 2 outcome flags set |
+| beginner_v3c | 4086 | 0.2553 | 134.63 | 230.6 | 0/200 | matches, file exists | 1/4086 done rows with 2 outcome flags set |
 
-All structure/sanity/episode/statistics/provenance checks passed on all three shards, and the tiers behave
-as their names claim (expert > noisy > medium success; medium mostly misses the bowl, noisy mostly drops
-food). The only defect: `expert_v3c` and `noisy_v3c` each have a handful (<0.1% of episodes) of done rows
-where two outcome flags are true at once (mostly `success` + `bowl_exited_zone`, all with
-`terminated=True`) instead of exactly one — an upstream env outcome-classification edge case, not a
-`collect.py`/`load_shard` bug. `success` is still correct on those rows; stage 2 should treat `success` as
-authoritative rather than assuming outcome-flag exclusivity. Full report:
-`.superpowers/sdd/pipeline-stage0/verify-shards-report.md`.
+All structure/sanity/episode/statistics/provenance checks passed on all four shards, and the tiers behave
+as their names claim (expert > noisy > medium > beginner success; medium mostly misses the bowl, noisy
+mostly drops food, beginner mostly reaches the bowl zone but exits it before releasing). The only defect:
+`expert_v3c`, `noisy_v3c` and `beginner_v3c` each have a handful (<0.1% of episodes) of done rows where two
+outcome flags are true at once (mostly `success` + `bowl_exited_zone`, all with `terminated=True`) instead
+of exactly one — an upstream env outcome-classification edge case, not a `collect.py`/`load_shard` bug.
+`success` is still correct on those rows; stage 2 should treat `success` as authoritative rather than
+assuming outcome-flag exclusivity. Full report: `.superpowers/sdd/pipeline-stage0/verify-shards-report.md`.

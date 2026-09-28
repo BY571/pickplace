@@ -21,12 +21,16 @@ the data. Bottom: the two camera views that are stored (shown here at 128 px; th
 
 Offline-RL dataset of a simulated Franka arm picking food from a supply tray and placing it into bowls
 riding a moving conveyor belt, recorded in Isaac Lab 3 by rolling out a privileged-state teacher policy with
-cameras enabled. Four quality tiers (`expert`, `medium`, `beginner`, `noisy`) of the same task, generated
-from different teacher checkpoints (and, for `noisy`, injected action noise), so the mix has both clean
-demonstrations and characteristic failure modes to learn from. `expert` is the run's final checkpoint;
-`medium` and `beginner` are two earlier, progressively weaker checkpoints of that *same* training run,
-rolled out with zero action noise; `noisy` is the final checkpoint again, this time with Gaussian noise
-injected into the executed action — it is the only tier with action diversity around a fixed policy.
+cameras enabled. Three quality tiers (`expert`, `medium`, `beginner`) of the same task, generated from three
+different checkpoints of the same training run, rolled out deterministically (zero action noise), so the mix
+has both clean demonstrations and characteristic failure modes to learn from. `expert` is the run's final
+checkpoint; `medium` and `beginner` are two earlier, progressively weaker checkpoints of that *same* training
+run.
+
+A fourth tier, `noisy` (the expert checkpoint with Gaussian noise injected into the executed action — the
+only tier with any action diversity around a fixed policy), was collected and evaluated but has been
+withdrawn from this public dataset; it can be regenerated with `collect.py noise_sigma=0.2` against the same
+checkpoint.
 
 **Success condition, which is also when an episode ends:** the food item has settled in the bowl **and**
 the hand is back within 5 cm of its start pose. Episodes also end on a failure outcome (bowl leaves its
@@ -46,28 +50,29 @@ this card is written to stand on its own.
    (success, bowl failure, food dropped).
 2. Three checkpoints from that run were then rolled out with cameras turned on, action clipped to the
    teacher's `[-1, 1]` `TanhNormal` support, and every step recorded to a memory-mapped `TensorDict`
-   (`pipeline/1_collect_data/collect.py`). The teacher acts **deterministically** (its distribution mean),
-   except for the `noisy` tier where Gaussian noise is added to the executed action before clipping — the
-   only tier with any action diversity; `expert`, `medium` and `beginner` are all deterministic rollouts of
-   different checkpoints.
+   (`pipeline/1_collect_data/collect.py`). The teacher acts **deterministically** (its distribution mean) for
+   all three published tiers.
 
 | Tier | Source checkpoint | Checkpoint eval success | Action noise σ | Shard success rate | Dominant failure mode |
 |---|---|---|---|---|---|
 | `expert` | `ppo_teacher_final.pt` (final checkpoint) | 98.4% | 0 | **98.3%** | rare (`food_off_table` 1.2%) |
 | `medium` | `ppo_teacher_110100480.pt` (earlier checkpoint, same run) | 65.2% | 0 | **67.4%** | mostly misses the bowl (`bowl_exited_zone` ~31.5%), episodes run longer (mean length 164 vs expert's 114) |
 | `beginner` | `ppo_teacher_100139008.pt` (earlier still, same run) | 21.9% | 0 | **25.5%** | usually reaches the bowl zone but exits it before releasing (`bowl_exited_zone` ~73.4%), longest episodes of any tier (mean length 231) |
-| `noisy` | `ppo_teacher_final.pt` (final checkpoint + action noise) | 98.4% | 0.2 | **84.1%** | mostly drops food (`food_off_table` ~9.5%) |
 
 The tiers fail in different, characteristic ways by construction — that's the point of mixing them for
 offline RL / distillation: `medium` is a weaker policy that struggles to place the food in the bowl at all,
-`beginner` is weaker still and rarely gets past reaching the bowl's zone without leaving it again, and
-`noisy` is the strong policy destabilized by execution noise, which more often drops what it's holding.
-σ = 0.2 was chosen from short probes of the expert checkpoint (σ 0.10 → 95.6%, σ 0.15 → 91.6%, σ 0.20 →
-83.5% success). The `beginner` checkpoint was chosen from the run's per-checkpoint evaluations as the
-closest available to a 10-20% success band: the run jumps from 0% eval success at 90 M training frames to
-21.9% at 100 M frames and 65.2% at 110 M frames, so `ppo_teacher_100139008.pt` (100.1 M frames, 21.9% eval
-success) is the closest checkpoint below 30% and the earliest one that isn't simply a policy that never
-grasps.
+and `beginner` is weaker still and rarely gets past reaching the bowl's zone without leaving it again. The
+`beginner` checkpoint was chosen from the run's per-checkpoint evaluations as the closest available to a
+10-20% success band: the run jumps from 0% eval success at 90 M training frames to 21.9% at 100 M frames and
+65.2% at 110 M frames, so `ppo_teacher_100139008.pt` (100.1 M frames, 21.9% eval success) is the closest
+checkpoint below 30% and the earliest one that isn't simply a policy that never grasps.
+
+A fourth tier, `noisy` (`ppo_teacher_final.pt` + Gaussian action noise, σ = 0.2, chosen from short probes of
+the expert checkpoint: σ 0.10 → 95.6%, σ 0.15 → 91.6%, σ 0.20 → 83.5% success; shard success rate 84.1%,
+dominant failure mode dropping food, `food_off_table` ~9.5%) was collected and evaluated the same way but has
+been **withdrawn from this public dataset** (it is the only tier with action diversity around a fixed
+policy, and it is not needed for the comparisons this dataset currently supports). It can be regenerated with
+`collect.py noise_sigma=0.2` against `ppo_teacher_final.pt` if a later experiment needs action-diverse data.
 
 Each tier is 1,007,616 frames (1 M frames rounded up to a whole number of collector batches, 512 parallel
 envs x 16 rollout steps x 123 batches), 84x84 px cameras, ~40.06 GB.
@@ -77,9 +82,8 @@ envs x 16 rollout steps x 123 batches), 84x84 px cameras, ~40.06 GB.
 | `expert` | 1,007,616 | 8,515 | 40.06 GB |
 | `medium` | 1,007,616 | 5,818 | 40.06 GB |
 | `beginner` | 1,007,616 | 4,086 | 40.06 GB |
-| `noisy` | 1,007,616 | 6,052 | 40.06 GB |
 
-Total: ~4.03 M frames, ~160 GB.
+Total: ~3.02 M frames, ~120 GB.
 
 ### Provenance (internal identifiers, kept for reproducibility only)
 
@@ -87,10 +91,9 @@ This dataset was collected by rolling out checkpoints from one internal teacher 
 - Run: `teachers/teacher_v3c_20260920T120408Z` (Hydra config `pipeline/0_state_teacher/config_v3c.yaml`,
   reward set `simple_v3b` — see [Reward function](#reward-function-simple_v3b) below), PPO via
   [TorchRL](https://github.com/pytorch/rl), Isaac Lab 3.
-- Checkpoints: `ppo_teacher_final.pt` (used for the `expert` and `noisy` tiers), `ppo_teacher_110100480.pt`
-  (used for `medium`) and `ppo_teacher_100139008.pt` (used for `beginner`) — two earlier and progressively
-  weaker checkpoints from the same run; their standalone evaluation success rates are in the tier table
-  above.
+- Checkpoints: `ppo_teacher_final.pt` (used for `expert`), `ppo_teacher_110100480.pt` (used for `medium`) and
+  `ppo_teacher_100139008.pt` (used for `beginner`) — two earlier and progressively weaker checkpoints from the
+  same run; their standalone evaluation success rates are in the tier table above.
 - Full reproducibility details (exact git commit, checkpoint sha256, resolved environment config, reward
   weights, per-tier collection stats) are recorded in each tier's own `manifest.json`.
 
@@ -147,7 +150,7 @@ custom_reward = (batch["next", "reward_terms"] * my_weights).sum(-1)  # drop-in 
 
 ## Layout
 
-Each tier is a folder (`expert/`, `medium/`, `beginner/`, `noisy/`) containing:
+Each tier is a folder (`expert/`, `medium/`, `beginner/`) containing:
 - `storage/` — a memory-mapped `TensorDict`, one row per environment step (this is what you load).
 - `manifest.json` — frames, episodes, tier config (noise σ, seed, image size, num_envs), the source
   checkpoint (path, sha256, its own evaluation metrics), the resolved environment config, reward set and
@@ -168,8 +171,8 @@ treating them as a valid transition.
 
 ## Known data quirk: double outcome flags
 
-A small number of `done` rows (<0.1% of episodes: 3/8,515 in `expert`, 6/6,052 in `noisy`, 1/4,086 in
-`beginner`, none in `medium`) have **two** outcome flags set simultaneously instead of exactly one — almost
+A small number of `done` rows (<0.1% of episodes: 3/8,515 in `expert`, 1/4,086 in `beginner`, none in
+`medium`) have **two** outcome flags set simultaneously instead of exactly one — almost
 always `success` together with `bowl_exited_zone` (a couple are `bowl_exited_zone` + `food_off_table`). All
 of these rows have `terminated=True`. This is an upstream environment outcome-classification edge case (the
 bowl leaving its tracked zone can coincide with a success or a food-drop event), not a recording bug —
@@ -181,7 +184,7 @@ as the authoritative outcome flag**; do not assume the outcome flags are mutuall
 ![Frames as stored in the dataset](assets/dataset_frames.png)
 
 *Six frames sampled across the `expert` tier, both cameras, exactly as stored (84x84x3 uint8, upscaled
-here with nearest-neighbour). The schema below is identical across all four tiers.*
+here with nearest-neighbour). The schema below is identical across all three tiers.*
 
 Every row of `storage/` has the following keys.
 
@@ -199,8 +202,8 @@ Every row of `storage/` has the following keys.
 | `("privileged", "food_pos")` | float32 | `(3,)` | food item position (teacher-only signal) |
 | `("privileged", "food_quat")` | float32 | `(4,)` | food item orientation (xyzw) |
 | `("privileged", "is_grasped")` | float32 | `(1,)` | 1.0 if the food is currently grasped |
-| `action` | float32 | `(7,)` | executed action (post-noise for `noisy`) |
-| `loc` | float32 | `(7,)` | teacher policy's `TanhNormal` mean, pre-noise |
+| `action` | float32 | `(7,)` | executed action (equal to `loc` in this dataset: all three published tiers are noise-free) |
+| `loc` | float32 | `(7,)` | teacher policy's `TanhNormal` mean |
 | `scale` | float32 | `(7,)` | teacher policy's `TanhNormal` scale |
 | `step_count` | int64 | `(1,)` | step index within the episode |
 | `("collector", "traj_ids")` | int64 | `()` | trajectory id, unique per episode across the whole shard |

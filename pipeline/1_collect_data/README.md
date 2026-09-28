@@ -63,7 +63,7 @@ Mixing tiers and relabelling rewards belongs to stage 2, not here.
 
 ## Tiers (collected 2026-09-20/23 from `teachers/teacher_v3c_20260920T120408Z`)
 
-All four at 84 px, `num_envs=512`, `rollout_steps=16`, 1 M frames (rounded up to 1,007,616 = 123 batches),
+Three tiers at 84 px, `num_envs=512`, `rollout_steps=16`, 1 M frames (rounded up to 1,007,616 = 123 batches),
 in `$FOOD_ROBOT_ARTIFACTS/shards/`. Success rate is the shard's own (every episode that finished during the
 collection), not the checkpoint's evaluation.
 
@@ -71,18 +71,21 @@ collection), not the checkpoint's evaluation.
 |---|---|---|---|---|---|---|---|
 | expert | `expert_v3c` | `ppo_teacher_final.pt` (0.984) | 0 | 0 | **0.983** | 40.1 GB | 11.4 M frames/h (317 s) |
 | medium | `medium_v3c` | `ppo_teacher_110100480.pt` (0.652) | 0 | 1 | **0.674** | 40.1 GB | 11.6 M frames/h (314 s) |
-| noisy | `noisy_v3c` | `ppo_teacher_final.pt` (0.984) | 0.2 | 2 | **0.841** | 40.1 GB | 11.2 M frames/h (323 s) |
 | beginner | `beginner_v3c` | `ppo_teacher_100139008.pt` (0.219) | 0 | 3 | **0.255** | 40.1 GB | 3.5 M frames/h (1039 s) |
 
 The tiers fail in different ways, which is the point of mixing them: the medium teacher mostly misses the bowl
-(31% `bowl_exited_zone`, mean episode length 164 steps vs the expert's 114), the noisy expert mostly drops
-food (9.5% `food_off_table`, 5% missed), and the beginner teacher — the earliest checkpoint whose eval success
-is above 0% (the run jumps from 0% at 90 M frames to 21.9% at 100 M) — mostly reaches the bowl zone but leaves
-it before releasing (73% `bowl_exited_zone`, mean episode length 231 steps, longest of any tier). σ = 0.2 came
-from 80 k-frame probes of the expert checkpoint: σ 0.10 → 0.956, σ 0.15 → 0.916, σ 0.20 → 0.835 success. Peak
-host memory was 31 GB (512 envs, 84 px); `beginner_v3c` collected at 3.5 M frames/h instead of the usual
-~11.4 M frames/h because it ran concurrently with unrelated GPU load on the Spark (portfolio-management
-training jobs), not because of anything in `collect.py`.
+(31% `bowl_exited_zone`, mean episode length 164 steps vs the expert's 114), and the beginner teacher — the
+earliest checkpoint whose eval success is above 0% (the run jumps from 0% at 90 M frames to 21.9% at 100 M) —
+mostly reaches the bowl zone but leaves it before releasing (73% `bowl_exited_zone`, mean episode length 231
+steps, longest of any tier). Peak host memory was 31 GB (512 envs, 84 px); `beginner_v3c` collected at 3.5 M
+frames/h instead of the usual ~11.4 M frames/h because it ran concurrently with unrelated GPU load on the
+Spark (portfolio-management training jobs), not because of anything in `collect.py`.
+
+A fourth tier, `noisy` (the expert checkpoint with `noise_sigma=0.2` action noise, σ = 0.2 chosen from 80
+k-frame probes: σ 0.10 → 0.956, σ 0.15 → 0.916, σ 0.20 → 0.835 success; shard success **0.841**, 40.1 GB, 11.2
+M frames/h), was collected and is kept locally at `$FOOD_ROBOT_ARTIFACTS/shards/noisy_v3c`, but has been
+withdrawn from the public Hub dataset (user's decision). It can be regenerated cheaply with
+`collect.py noise_sigma=0.2` against the same checkpoint if a later experiment needs action-diverse data.
 
 ## Verification
 

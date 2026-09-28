@@ -141,9 +141,12 @@ def train(cfg, make_algo, kind: str) -> None:
             "eval_num_envs": int(cfg.eval.num_envs) if latest_eval else None,
         })
         checkpoints.append(path.name)
-        update_json(manifest_path, checkpoints=checkpoints, gradient_steps=step, eval_history=history)
+        update_json(manifest_path, checkpoints=checkpoints, gradient_steps=step, eval_history=history,
+                    peak_memory_gb=round(peak_memory_gb, 2))
         print("CHECKPOINT " + json.dumps({"name": path.name, "step": step}), flush=True)
         return path
+
+    peak_memory_gb = 0.0
 
     stop = {"reason": "gradient_steps"}
     signal.signal(signal.SIGTERM, lambda *_: stop.update(reason="sigterm"))
@@ -180,12 +183,15 @@ def train(cfg, make_algo, kind: str) -> None:
             if step % log_interval == 0:
                 now = time.monotonic()
                 metrics = {f"train/{k}": v / log_interval for k, v in sums.items()}
+                current_memory_gb = memory_used_gb()
+                peak_memory_gb = max(peak_memory_gb, current_memory_gb)
                 metrics.update({
                     "perf/steps_per_s": log_interval / (now - last_log),
                     "perf/sample_s_per_step": sample_s / log_interval,
                     "perf/update_s_per_step": update_s / log_interval,
                     "perf/eval_fraction": eval_seconds / max(now - start, 1e-9),
-                    "perf/memory_used_gb": memory_used_gb(),
+                    "perf/memory_used_gb": current_memory_gb,
+                    "perf/peak_memory_gb": peak_memory_gb,
                     "perf/elapsed_h": (now - start) / 3600.0,
                 })
                 if latest_eval:
@@ -207,10 +213,12 @@ def train(cfg, make_algo, kind: str) -> None:
     finally:
         save(f"{kind}_final", step)
         stop_info = {"reason": stop["reason"], "gradient_steps": step, "best_eval": dict(best),
-                     "hours": round((time.monotonic() - start) / 3600.0, 3)}
+                     "hours": round((time.monotonic() - start) / 3600.0, 3),
+                     "peak_memory_gb": round(peak_memory_gb, 2)}
         print("STOP_REASON " + json.dumps(stop_info), flush=True)
         update_json(manifest_path, stop_reason=stop["reason"], gradient_steps=step, best_eval=dict(best),
-                    eval_history=history, ended_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+                    eval_history=history, ended_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    peak_memory_gb=round(peak_memory_gb, 2))
         if logger is not None and cfg.logger.backend == "wandb":
             logger.experiment.summary.update({f"stop/{k}": v for k, v in stop_info.items()})
             logger.experiment.finish()  # os._exit below skips wandb's exit hooks

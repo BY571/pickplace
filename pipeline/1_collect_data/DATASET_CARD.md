@@ -38,8 +38,7 @@ tracked zone, bowl falls off the belt or tips, food is dropped off the table) or
 
 **Code:** the environment, the teacher training and the collection script live at
 [github.com/BY571/pickplace](https://github.com/BY571/pickplace) (`pipeline/0_state_teacher` and
-`pipeline/1_collect_data`). The repository is private at the time of writing and will be opened later, so
-this card is written to stand on its own.
+`pipeline/1_collect_data`). This card is written to stand on its own, so you can use the data without it.
 
 ## How the data was generated
 
@@ -230,7 +229,7 @@ means and a relabelling example.
 
 ## How to load
 
-With the (private) source repo, `pickplace.datasets.load_shard` opens a shard as a TorchRL replay buffer,
+With the source repo, `pickplace.datasets.load_shard` opens a shard as a TorchRL replay buffer,
 reading nothing into RAM until you sample:
 
 ```python
@@ -255,7 +254,25 @@ batch = buffer.sample()
 Mixing tiers and relabelling rewards is left to the consumer — this dataset is deliberately just the raw,
 per-tier shards.
 
+## Baselines
+
+Three offline-RL algorithms trained on the `expert` tier with the deployable observation set (both cameras
+plus proprioception), three seeds each, 100,000 gradient steps, evaluated online in the same simulator:
+
+| Algorithm | Best success | Mean of last 5 evaluations |
+|---|---|---|
+| Behavior cloning | 0.979 ± 0.008 | 0.944 ± 0.016 |
+| IQL | 0.990 ± 0.012 | 0.956 ± 0.011 |
+| TD3+BC (`alpha` 0.025, not the paper's 2.5) | 0.958 ± 0.008 | 0.919 ± 0.019 |
+
+For reference the teacher that generated the data scores 0.984 under the same protocol. Two caveats worth
+knowing before you benchmark against these: the published tiers are **noise-free**, so a critic sees almost
+no action diversity and value-based methods have little to exploit over cloning (TD3+BC needs its BC weight
+turned up two orders of magnitude to learn at all); and episodic success does not predict performance in
+continuous operation, where the ranking inverted in our tests. Details and per-seed numbers:
+[`pipeline/2_1_offline_rl/README.md`](https://github.com/BY571/pickplace/blob/main/pipeline/2_1_offline_rl/README.md).
+
 ## License
 
-Released under CC BY 4.0. If you'd prefer a different license (e.g. MIT, Apache-2.0, or CC0), it's easy to
-change — just ask.
+Released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): use it for anything, including
+commercially, with attribution.

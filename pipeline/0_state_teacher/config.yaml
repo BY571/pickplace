@@ -17,7 +17,9 @@ env:
     bowl_offset_y: [-0.04, 0.04]
   ingredient_bowl_x_range: [0.45, 0.45]
   ingredient_bowl_y_range: [-0.10, -0.10]
-  reward_set: simple_v2      # pickplace/reward_sets/<name>.yaml
+  reward_set: simple_v3b     # pickplace/reward_sets/<name>.yaml
+  success_requires_home: true  # simple_v3b pays return_home, so the episode must not end at the placement:
+                               # success = food settled in the bowl AND the TCP back within home_tolerance
   reward_weights: {}         # per-run overrides on top of the set
   food_params: {}
   seed: 0

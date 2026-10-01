@@ -47,7 +47,7 @@ def test_collect_writes_a_loadable_shard_with_a_manifest(tmp_path, teacher_check
     assert manifest["checkpoint"] == str(teacher_checkpoint) and len(manifest["checkpoint_sha256"]) == 64
     assert manifest["checkpoint_eval"] is None  # the smoke teacher runs with worker.enabled=false
     assert manifest["env"]["cameras"] is True and manifest["env"]["image_size"] == [IMAGE, IMAGE]
-    assert manifest["env"]["reward_set"] == "simple_v2" and manifest["reward_weights"]["success"] > 0
+    assert manifest["env"]["reward_set"] == "simple_v3b" and manifest["reward_weights"]["success"] > 0
     assert manifest["git_commit"] and manifest["frames_per_hour"] > 0 and manifest["size_bytes"] > 0
     stats = manifest["stats"]
     assert stats["episodes"] >= 1 and 0.0 <= stats["success_rate"] <= 1.0

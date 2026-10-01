@@ -1,12 +1,16 @@
-# simple_v3b — simple_v3 with 10x smaller smoothness penalties, for fine-tuning an already-placing policy.
+# simple_v3b — the reward the pipeline uses, and the one every published teacher and dataset was made with.
 #
-# simple_v3 trained from scratch (pipeline/0_state_teacher/config_v3.yaml) failed: action_rate -0.1 and
-# joint_vel -0.01 collapsed policy entropy before the lift was ever discovered, because a random early policy's
-# per-episode action_rate (~20-28) and joint_vel (~80-140) sums made those penalties dominate the return long
-# before reach_food/grasp paid anything. Here we start from the v2 checkpoint (98% deterministic success,
-# init_checkpoint in config_v3b.yaml), which already places the ball, so exploration only needs to discover
-# return_home on top of a policy that already moves purposefully — action_rate -0.01 and joint_vel -0.001 are
-# small enough not to re-collapse that policy's entropy, while still nudging it toward smoother motion.
+# Reads as a ladder along the task: each stage pays more than the one before (1, 2, 5, 10, 20), so lingering
+# at an earlier stage is never worth it, and `success` (150) dwarfs all of it. Dense terms are reward per
+# second held; `success` is a one-shot bonus on the step the episode ends that way.
+#
+# The two motion penalties are deliberately tiny. At 10x these values a from-scratch run collapsed: policy
+# entropy fell from 4.7 to -13.6 and the arm never discovered the lift, because a random policy's per-episode
+# action_rate (~20-28) and joint_vel (~80-140) sums dominate the return long before reach_food or grasp pay
+# anything. Small enough to smooth the motion, not large enough to become the objective.
+#
+# `transport_fine`, `bowl_failure` and `food_dropped` exist in the vocabulary (pickplace.rewards.REWARD_TERMS)
+# but carry no weight here; they stay in the recorded reward vector so a dataset can be relabelled with them.
 reach_food: 1.0
 grasp: 2.0
 grasp_lift: 5.0

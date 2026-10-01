@@ -70,7 +70,7 @@ def test_teacher_trains_logs_terms_and_writes_checkpoints_with_manifests(tmp_pat
     assert len(names) >= 3, names  # 3000-frame interval over 6144 frames: two periodic + final
     for p in ckpts:
         m = json.loads(p.with_suffix(".json").read_text())
-        assert m["frames"] > 0 and len(m["sha256"]) == 64 and m["config"]["env"]["reward_set"] == "simple_v2"
+        assert m["frames"] > 0 and len(m["sha256"]) == 64 and m["config"]["env"]["reward_set"] == "simple_v3b"
         assert m["eval"] is None and m["video"] is None
     manifest = json.loads((run / "manifest.json").read_text())
     assert manifest["kind"] == "state_teacher" and manifest["stop_reason"] == "total_frames"
@@ -91,15 +91,18 @@ def test_teacher_trains_with_compile_and_shifted_gae(tmp_path):
         assert key in metrics[-1], key
 
 
-def test_teacher_v3_config_trains(tmp_path):
+def test_teacher_v3c_config_trains(tmp_path):
+    """config_v3c is the config that trained the published teacher: the base config plus randomized start poses."""
     proc, tail = _train(
-        tmp_path, "max_iterations=4", "checkpoint.interval_frames=0", "worker.enabled=false", config_name="config_v3"
+        tmp_path, "max_iterations=4", "checkpoint.interval_frames=0", "worker.enabled=false",
+        "init_checkpoint=null", config_name="config_v3c",
     )
     assert "PPO_DONE" in proc.stdout, tail
     assert len(_lines(proc.stdout, "METRICS ")) == 4, tail
     config = json.loads((tmp_path / "run" / "manifest.json").read_text())["config"]
-    assert config["env"]["reward_set"] == "simple_v3" and config["env"]["success_requires_home"] is True
-    assert config["collector"]["total_frames"] == 600_000_000 and config["logger"]["exp_name"] == "state_teacher_v3"
+    assert config["env"]["reward_set"] == "simple_v3b" and config["env"]["success_requires_home"] is True
+    assert config["env"]["robot_reset"]["position_range"] == [-0.25, 0.25]
+    assert config["collector"]["total_frames"] == 300_000_000 and config["logger"]["exp_name"] == "state_teacher_v3c"
     # everything else comes from config.yaml
     assert config["network"]["hidden"] == [512, 256, 128] and config["env"]["action_mode"] == "ee_delta_pose"
 

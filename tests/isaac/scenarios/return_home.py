@@ -34,7 +34,7 @@ ENV = {
     "cameras": False,
     "privileged_information": True,
     "action_mode": "joint_pos",
-    "reward_set": "simple_v3",
+    "reward_set": "simple_v3b",
     "success_requires_home": True,
     "belt": {"speed_noise": 0.0, "bowl_offset_x": [0.0, 0.0], "bowl_offset_y": [0.0, 0.0]},
 }

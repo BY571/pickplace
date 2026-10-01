@@ -19,7 +19,7 @@ Usage:
                                          [env.robot_reset.position_range=[-0.5,0.5]] \\
                                          [env.robot_reset.velocity_range=[-0.1,0.1]]
 
-Defaults to the v2r fine-tune's wide randomization (+-0.25 rad / +-0.1 rad/s); pass the training default
+Defaults to the teacher config_v3c randomization (+-0.25 rad / +-0.1 rad/s); pass the training default
 (+-0.02 rad / 0.0 rad/s) for the comparison figure, e.g.:
     python scripts/render_start_poses.py out=outputs/render/start_poses_default.png \\
         env.robot_reset.position_range=[-0.02,0.02] env.robot_reset.velocity_range=[0.0,0.0]

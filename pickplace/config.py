@@ -45,7 +45,7 @@ DEFAULT_ENV: dict = {
     "render_cam_target": [0.3, 0.0, 0.35],
     "render_image_size": [720, 1280],
     "rewards": {},
-    "reward_set": "staged_v1",
+    "reward_set": "simple_v3b",
     "reward_weights": {},
     "food_params": {},
     # Continuous demo (pipeline/0_state_teacher/demo.py only): None = the training scene; a mapping with any of

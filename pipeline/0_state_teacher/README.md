@@ -1,13 +1,14 @@
 # Stage 0 · privileged state teacher
 
 PPO from robot state (`proprio`), bowl pose (`belt`) and food pose + grasp flag (`privileged`), cameras off,
-with a dense simulator-only reward (`env.reward_set`, default `simple_v2`: reach, grasp, lift, transport,
-food released in the bowl and success, no penalties). Its checkpoints are the experts stage 1 records camera datasets from.
+with a dense simulator-only reward (`env.reward_set`, default and only set `simple_v3b`: reach, grasp, lift,
+transport, food released in the bowl, return home, a success bonus and small motion penalties — see
+`docs/environment.md`). Its checkpoints are the experts stage 1 records camera datasets from.
 
 ## Run
 
     python pipeline/0_state_teacher/train.py
-    python pipeline/0_state_teacher/train.py env.reward_set=staged_v1 +env.reward_weights.grasp=4.0
+    python pipeline/0_state_teacher/train.py +env.reward_weights.grasp=4.0   # override single weights
 
 Stop gracefully (final checkpoint, evaluation and video are still written):
 
@@ -17,27 +18,26 @@ Early stopping (`early_stop.success_rate`) reads the background worker's **evalu
 training one: it stops once `early_stop.consecutive_evals` (4) evaluations in a row reach the threshold, so it
 needs `worker.enabled=true` (a warning is logged and early stopping is disabled otherwise).
 
-## v3 (return home, smoother motion)
+## config_v3c — the config behind the published teacher
 
-`config_v3.yaml` = `config.yaml` plus: `env.success_requires_home: true` — success (and the episode end) needs the
-food settled in the bowl **and** the TCP within `env.home_tolerance` (0.05 m) of its home position (the TCP at
-the default joint pose; end-effector space because the IK policy cannot steer the redundant elbow), so the teacher
-learns to finish the job instead of wandering after the release; reward set
-`simple_v3` — `return_home` (new dense term, `1 - tanh(d / 0.2 m)` while the food lies released in the bowl),
-success 150, and small motion penalties (`action_rate` -0.1, `joint_vel` -0.01, `bowl_disturbance` -10) against
-jerky actions and bumped bowls (reasoning in `pickplace/reward_sets/simple_v3.yaml`); `total_frames` 600 M with early
-stopping (eval success now means placed AND home); W&B name `state_teacher_v3`. The v2 defaults are unchanged.
+`config_v3c.yaml` = `config.yaml` plus `env.success_requires_home: true` (success, and the episode end, needs
+the food settled in the bowl **and** the TCP within `env.home_tolerance` = 0.05 m of its home position) and
+randomized start poses (`robot_reset`: ±0.25 rad, ±0.1 rad/s). It warm-starts from an earlier checkpoint via
+`init_checkpoint`; set `init_checkpoint=null` to train from scratch.
 
-    ./scripts/launch_teacher_v3.sh     # one detached container: v3 tests, then (only if they pass) training
-    python pipeline/0_state_teacher/train.py --config-name config_v3 [key=value ...]   # directly
+    ./scripts/launch_teacher.sh                                      # tests, then training, in one container
+    python pipeline/0_state_teacher/train.py --config-name config_v3c [key=value ...]
 
-With a v3 checkpoint, try the continuous demo without the scripted return: `demo.py ... home_between=false`.
+With such a checkpoint, try the continuous demo without the scripted return: `demo.py ... home_between=false`.
 
-## v3b (fine-tune v2 with the v3 reward)
-
-`config_v3b.yaml` fine-tunes the v2 checkpoint (`init_checkpoint`, fresh optimizer) instead of training v3 from
-scratch, with reward set `simple_v3b` (`simple_v3`'s `action_rate`/`joint_vel` 10x smaller — full size collapsed
-entropy before the lift was ever discovered) and a lower `optim.lr`. Launch: `CONFIG=config_v3b ./scripts/launch_teacher_v3.sh`.
+**How the reward got here.** Earlier reward sets (`simple_v1`/`v2`, `staged_v1`) and their configs have been
+removed now that the pipeline has settled on one; the history is in the git log and worth one summary. The
+first teachers ended the episode the moment the food landed, so the arm had no trained behaviour afterwards
+and froze in an extrapolated pose as soon as the line kept running. `return_home` plus
+`success_requires_home` fixed that. The motion penalties were initially 10x larger; from scratch they
+collapsed policy entropy before the lift was ever discovered, because a random policy's action-rate and
+joint-velocity sums dominate the return long before any shaping term pays out — hence the gentle −0.01 /
+−0.001 in `simple_v3b`.
 
 ## Outputs (`$FOOD_ROBOT_ARTIFACTS/teachers/<run>/`)
 

@@ -137,14 +137,14 @@ changes by exactly the configured bonus/penalty.
 | `grasp` | 2 | `grasped_mask` (0/1): fingers closed on the food, no lift needed -- a stepping stone toward `grasp_lift` |
 | `grasp_lift` | 5 | food grasped and above z = 0.10 |
 | `transport` | 10 | while grasped **and** held above z = 0.10 (same `lift_height` as `grasp_lift`): `1 − tanh(‖food − above(bowl)‖ / 0.3)` (moving target) |
-| `transport_fine` | 5 | same with σ = 0.05 |
-| `place_success` | +`success_bonus` (150) once | success termination |
-| `bowl_failure` | −`bowl_failure_penalty` (150) once | bowl off belt or tipped |
-| `food_dropped` | −`food_drop_penalty` (150) once | food off table |
-| `bowl_disturbance` | −1 | distance the bowl was pushed from where the pallet carries it |
-| `action_rate`, `joint_vel` | −1e-4 | regularization |
-| `food_in_bowl` | 0 in `staged_v1` (20 in `simple_v2`) | food inside the bowl and released (the success termination's geometry, without its speed/settle test) |
-| `return_home` | 0 before `simple_v3` (10 in `simple_v3`/`simple_v3b`) | while the food is released in the bowl: `1 − tanh(d / 0.4)`, `d` = TCP distance to its home pose |
+| `transport_fine` | 0 | same with σ = 0.05 (defined, unused) |
+| `success` | +150 once | success termination |
+| `bowl_failure` | 0 once | bowl off belt or tipped (defined, unused) |
+| `food_dropped` | 0 once | food off table (defined, unused) |
+| `bowl_disturbance` | −10 | distance the bowl was pushed from where the pallet carries it |
+| `action_rate`, `joint_vel` | −0.01, −0.001 | regularization |
+| `food_in_bowl` | 20 | food inside the bowl and released (the success termination's geometry, without its speed/settle test) |
+| `return_home` | 10 | while the food is released in the bowl: `1 − tanh(d / 0.4)`, `d` = TCP distance to its home pose |
 
 Each one-shot penalty/bonus is deliberately large enough that ending an episode early is never more
 profitable than a real attempt: dense shaping is non-negative, so early-ending never *gains* reward by
@@ -174,7 +174,7 @@ is the Isaac Lab term `place_success`).
 
 The training reward `("next", "reward")` is TorchRL's `LineariseRewards` over that vector: a weighted sum with
 one weight per term. Weights come from a named reward set, `pickplace/reward_sets/<name>.yaml`, selected by
-`env.reward_set` (default `staged_v1`, the table above) and overridden per term with
+`env.reward_set` (`simple_v3b`, the only set shipped and the default; the table above) and overridden per term with
 `env.reward_weights: {term: weight}` (e.g. the CLI override `+env.reward_weights.food_dropped=-10.0` — the
 `+` is required because the `sota-implementations/ppo` configs do not define the key, and Hydra's struct mode
 rejects adding an absent key without it). Dense weights are reward per second the term is held; event weights
@@ -352,7 +352,7 @@ constructor kwargs it forwards directly (`num_envs`, `arm`, `food`, `action_mode
 
 | Key | Meaning |
 |---|---|
-| `reward_set` | Name of a reward set in `pickplace/reward_sets/` (or a path to a YAML file); default `staged_v1`. |
+| `reward_set` | Name of a reward set in `pickplace/reward_sets/` (or a path to a YAML file); default `simple_v3b`. |
 | `reward_weights` | `{term: weight}` overrides over the reward set; unknown term names raise `KeyError`. |
 | `rewards` | Legacy: `{dense_term: weight}` overrides. Unknown or non-dense names (e.g. `place_success`) raise `KeyError`. |
 | `success_bonus` / `bowl_failure_penalty` / `food_drop_penalty` | Legacy: when not null, set the `success` weight to `+value` and the `bowl_failure` / `food_dropped` weights to `-value`. |

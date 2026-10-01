@@ -35,7 +35,7 @@ EVENT_SOURCES: dict[str, tuple[str, ...]] = {
 }
 
 REWARD_SETS_DIR = Path(__file__).parent / "reward_sets"
-DEFAULT_REWARD_SET = "staged_v1"
+DEFAULT_REWARD_SET = "simple_v3b"
 
 # Pre-reward-set env keys, kept so existing configs (runs 1-3) resolve to the same reward.
 _LEGACY_EVENT_FIELDS = {
@@ -69,7 +69,7 @@ def load_reward_set(name_or_path: str) -> dict[str, float]:
 def resolve_reward_weights(env_cfg: Mapping) -> dict[str, float]:
     """Final per-term weights for an env config.
 
-    Precedence (later wins): the reward set ``reward_set`` (default ``staged_v1``); legacy ``rewards``
+    Precedence (later wins): the reward set ``reward_set`` (default ``simple_v3b``); legacy ``rewards``
     (dense terms only); legacy ``success_bonus`` / ``bowl_failure_penalty`` / ``food_drop_penalty`` when not
     None (penalties become negative weights); ``reward_weights``.
     """

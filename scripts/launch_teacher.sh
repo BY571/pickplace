@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Overnight launch of a state teacher config (pipeline/0_state_teacher/config_v3.yaml by default) on the DGX Spark.
+# Overnight launch of a state teacher config (pipeline/0_state_teacher/config_v3c.yaml by default).
 #
 # One detached container: first the tests that cover v3 (unit, reward vector, return-home semantics, teacher smoke
-# incl. config_v3); only if all pass, the training run. The log shows TESTS_PASSED before training starts, or
+# incl. config_v3c); only if all pass, the training run. The log shows TESTS_PASSED before training starts, or
 # TESTS_FAILED (and the container exits) otherwise.
 #
-# Usage: ./scripts/launch_teacher_v3.sh [hydra overrides for train.py, e.g. env.num_envs=16384]
+# Usage: ./scripts/launch_teacher.sh [hydra overrides for train.py, e.g. env.num_envs=16384]
 #        (SPARK_HOST overrides the ssh host, as in spark.sh; CONFIG picks the Hydra config name, e.g.
-#        CONFIG=config_v3b ./scripts/launch_teacher_v3.sh)
+#        CONFIG=config ./scripts/launch_teacher.sh)
 set -euo pipefail
 
 SPARK_HOST="${SPARK_HOST:-spark}"
-CONFIG="${CONFIG:-config_v3}"
+CONFIG="${CONFIG:-config_v3c}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_NAME="teacher_${CONFIG#config_}_$(date -u +%Y%m%dT%H%M%SZ)"
 EXTRA=""; (( $# )) && EXTRA="$(printf ' %q' "$@")"  # extra Hydra overrides, passed on to train.py

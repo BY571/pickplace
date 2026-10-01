@@ -115,7 +115,7 @@ Success was still 0% and `grasp_lift` still 0 at 2.8 M frames — 1.4% of the tr
   `grasp_lift` ~0, `transport` 0.308 and no successes; see the two top rows of the improvements table.
 - Stop a run gracefully (finishes the iteration, saves the final checkpoint):
 
-      ssh spark 'docker exec <container> pkill -TERM -f "kit/python/bin/python3.*ppo_pixels.py"'
+      docker exec <container> pkill -TERM -f "kit/python/bin/python3.*ppo_pixels.py"
 
   Note there is no space before `ppo_pixels.py`: the command line is `.../python3 sota-implementations/ppo/ppo_pixels.py`,
   so a pattern ending in `" ppo_pixels.py"` matches nothing and the run keeps going. `docker stop` does not work

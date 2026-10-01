@@ -6,7 +6,7 @@ the camera views a student will get plus everything needed to relabel the reward
 
 ## Collect
 
-    ./scripts/spark.sh --detach python pipeline/1_collect_data/collect.py \
+    python pipeline/1_collect_data/collect.py \
         checkpoint=/workspace/artifacts/teachers/<run>/checkpoints/ppo_teacher_final.pt \
         frames=1000000 num_envs=512 image_size=84 seed=0 out=/workspace/artifacts/shards/expert_v3c
 
@@ -84,7 +84,8 @@ Spark (portfolio-management training jobs), not because of anything in `collect.
 A fourth tier, `noisy` (the expert checkpoint with `noise_sigma=0.2` action noise, σ = 0.2 chosen from 80
 k-frame probes: σ 0.10 → 0.956, σ 0.15 → 0.916, σ 0.20 → 0.835 success; shard success **0.841**, 40.1 GB, 11.2
 M frames/h), was collected and is kept locally at `$FOOD_ROBOT_ARTIFACTS/shards/noisy_v3c`, but has been
-withdrawn from the public Hub dataset (user's decision). It can be regenerated cheaply with
+withdrawn from the published Hub dataset: action noise makes a worse demonstrator than an
+earlier checkpoint does, so the `beginner` tier replaced it. It can be regenerated cheaply with
 `collect.py noise_sigma=0.2` against the same checkpoint if a later experiment needs action-diverse data.
 
 ## Verification
@@ -93,7 +94,7 @@ withdrawn from the public Hub dataset (user's decision). It can be regenerated c
 image content), episode structure (trajectory-id runs, done/outcome exclusivity, the successor-stride
 invariant), recomputed statistics vs the manifest, checkpoint provenance, and cross-tier plausibility:
 
-    ./scripts/spark.sh python scripts/verify_shard.py \
+    python scripts/verify_shard.py \
         /workspace/artifacts/shards/expert_v3c /workspace/artifacts/shards/medium_v3c \
         /workspace/artifacts/shards/noisy_v3c /workspace/artifacts/shards/beginner_v3c
 

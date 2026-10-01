@@ -105,7 +105,7 @@ at `rollout_steps=24` that is `≈ 18.9 MB/env` per PPO iteration's buffer.
 With frame_stack=3 every number above triples; storing pixels as uint8 in the replay buffer (as
 sota-implementations/ppo/ppo_pixels.py does) divides it by 4.
 
-On the 128 GB unified-memory Spark, leaving headroom for PhysX/rendering buffers and the network, a
+On a 128 GB unified-memory machine, leaving headroom for PhysX/rendering buffers and the network, a
 reasonable starting range with both default cameras at 128×128 is `num_envs` in the low hundreds to
 ~1000 for camera-observing policies (`cameras=True`); the privileged/state-only teacher setup
 (`cameras=False`) has no such constraint and is what the `sota-implementations/ppo/README.md` scale run

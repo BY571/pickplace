@@ -8,14 +8,14 @@ The online baselines in `sota-implementations/` are unaffected.
 |---|---|---|---|
 | 0 · state teacher | `0_state_teacher/` | env config + reward set | checkpoints every 10 M frames + final, each with a manifest and (background) deterministic evaluation and video |
 | 1 · collect data | `1_collect_data/` | one teacher checkpoint + frames + noise σ + seed | one dataset shard (camera + state + actions + reward terms) with a manifest |
-| 2.1 · offline RL (planned) | `2_1_offline_rl/{iql,cql,td3_bc}/` | shards + mixing proportions + a reward set to relabel with | student checkpoints, online simulator evaluation |
+| 2.1 · offline RL | `2_1_offline_rl/{bc,iql,cql,td3_bc}/` | shards + mixing proportions + a reward set to relabel with | student checkpoints, online simulator evaluation |
 
 ## Artifacts
 
 Artifacts live outside the repository under `$FOOD_ROBOT_ARTIFACTS` (default `~/food-robot-artifacts`):
-`teachers/`, `shards/` and later `students/`. `docker/run.sh` mounts the host's `~/food-robot-artifacts` at
-`/workspace/artifacts` and sets the variable. Every artifact carries a JSON manifest with the git commit
-(`scripts/spark.sh` forwards it as `FOOD_ROBOT_GIT_COMMIT`), the resolved config and its own summary.
+`teachers/`, `shards/` and `students/`. `docker/run.sh` mounts that directory at `/workspace/artifacts` and
+sets the variable. Every artifact carries a JSON manifest with the git commit (set `FOOD_ROBOT_GIT_COMMIT`
+when running from a checkout without `.git`), the resolved config and its own summary.
 
 ## Rewards
 

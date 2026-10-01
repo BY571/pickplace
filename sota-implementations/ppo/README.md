@@ -4,23 +4,22 @@ Proximal Policy Optimization on `FoodRobot-Cell-v0`, following TorchRL's `sota-i
 
 ## Run
 
-Nothing runs on the laptop; every command below runs on the DGX Spark through `./scripts/spark.sh`
-(inside the container by default). A small run (e.g. for a quick sanity check):
+Commands below run inside the container (`./docker/run.sh <command>`). A small run, e.g. for a quick
+sanity check:
 
-    ./scripts/spark.sh python sota-implementations/ppo/ppo.py env.num_envs=16 collector.rollout_steps=8 max_iterations=3
+    python sota-implementations/ppo/ppo.py env.num_envs=16 collector.rollout_steps=8 max_iterations=3
 
 Full-scale training:
 
-    ./scripts/spark.sh python sota-implementations/ppo/ppo.py env.num_envs=4096 logger.backend=wandb
+    python sota-implementations/ppo/ppo.py env.num_envs=4096 logger.backend=wandb
 
-Both of the above run attached to your terminal (the ssh session must stay open for the duration).
-For a real training run, start it detached instead so it survives a disconnect:
+Both of the above run attached to your terminal. For a real training run, start it detached so it
+survives a disconnect:
 
-    ./scripts/spark.sh --detach python sota-implementations/ppo/ppo.py env.num_envs=4096 logger.backend=wandb
+    DOCKER_DETACH=1 DOCKER_NAME=ppo-4096 ./docker/run.sh python sota-implementations/ppo/ppo.py \
+        env.num_envs=4096 logger.backend=wandb
 
-This starts the command in a named, detached container (`food-robot-<timestamp>`) and returns
-immediately, printing the container name plus the commands to follow its logs
-(`ssh spark docker logs -f <name>`) and stop it (`ssh spark docker stop <name>`).
+Follow its logs with `docker logs -f ppo-4096` and stop it with `docker stop ppo-4096`.
 
 Play a checkpoint (opens the viewer):
 
@@ -58,7 +57,7 @@ bowl position — with geometric domain randomization of the supply bowl, bowl a
 structure: one CNN per camera (32/64/64 channels, kernels 8/4/3, strides 4/2/1 → 256), proprio → Linear 128 +
 LayerNorm + ELU, fused by an MLP 512-256. Camera frames are stored as uint8 in the replay buffer.
 
-    ./scripts/spark.sh --detach python sota-implementations/ppo/ppo_pixels.py
+    python sota-implementations/ppo/ppo_pixels.py
 
 Config: `config_pixels.yaml` (scale settings from the benchmark in `docs/experiments/ppo_pixels_run1`).
 `reward_scale` scales the rewards used for GAE and the loss; logged returns are unscaled.
@@ -69,7 +68,7 @@ Render a checkpoint (scene camera + the policy's camera inputs):
 
 The run ends at `collector.total_frames` (1 billion env frames), or earlier once the training success rate reaches
 `early_stop.success_rate` (85%) in `early_stop.consecutive_iterations` (10) iterations in a row, after `max_hours`, or on
-SIGTERM (`ssh spark 'docker exec <container> pkill -TERM -f "kit/python/bin/python3.* ppo_pixels.py"'`; `docker stop`
+SIGTERM (`docker exec <container> pkill -TERM -f "kit/python/bin/python3.* ppo_pixels.py"`; `docker stop`
 does not reach Python through Isaac Sim's `python.sh` wrapper). In every case the policy is saved as
 `checkpoints/ppo_pixels_final.pt` first, and a `STOP_REASON {json}` line says why it ended.
 
@@ -93,7 +92,7 @@ Logged metrics (W&B, and one `METRICS {json}` stdout line per iteration):
 ## Measured on DGX Spark (2026-09-15)
 
 `python ppo.py env.num_envs=4096 max_iterations=5 logger.backend=csv` (state-based teacher config:
-`cameras=false privileged_information=true`), run three times via `./scripts/spark.sh --detach`:
+`cameras=false privileged_information=true`), run three times:
 
 - **FPS:** collector+update throughput was consistently ≈ 41,000 env-steps/s once the scene was built
   (`frames_per_batch = num_envs × rollout_steps = 4096 × 24 = 98,304`; all 5 iterations —

@@ -1,0 +1,33 @@
+\documentclass[border=12pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{ragged2e}
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash\hyphenpenalty=10000\exhyphenpenalty=10000}p{#1}}
+\newcommand{\headrule}{\noalign{\global\arrayrulewidth=1.2pt}\hline\noalign{\global\arrayrulewidth=0.4pt}}
+\begin{document}
+\begin{tabular}{|l|l|c|L{8.6cm}|}
+\hline
+\textbf{Group} & \textbf{Key} & \textbf{Dim} & \textbf{What it is} \\
+\headrule
+\multirow{6}{*}{proprio}
+  & \texttt{joint\_pos\_rel} & 9 & Arm and finger joint positions, relative to the default pose \\ \cline{2-4}
+  & \texttt{joint\_vel\_rel} & 9 & Joint velocities \\ \cline{2-4}
+  & \texttt{gripper\_pos}    & 2 & Finger joint positions \\ \cline{2-4}
+  & \texttt{ee\_pos}         & 3 & TCP position in the cell frame \\ \cline{2-4}
+  & \texttt{ee\_quat}        & 4 & TCP orientation, as a quaternion \\ \cline{2-4}
+  & \texttt{last\_action}    & 7 & The action commanded at the previous step \\
+\hline
+belt & \texttt{bowl\_pos}    & 3 & Position of the target bowl riding the conveyor \\
+\hline
+\multirow{3}{8em}{privileged \\ \emph{(simulator only)}}
+  & \texttt{food\_pos}       & 3 & Position of the ball \\ \cline{2-4}
+  & \texttt{food\_quat}      & 4 & Orientation of the ball \\ \cline{2-4}
+  & \texttt{is\_grasped}     & 1 & Ground-truth flag: are both fingers in contact with the ball? \\
+\headrule
+\multicolumn{2}{|r|}{\textbf{total}} & \textbf{45} & \\
+\hline
+\end{tabular}
+\end{document}

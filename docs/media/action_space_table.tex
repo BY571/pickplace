@@ -1,0 +1,22 @@
+\documentclass[border=12pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{ragged2e}
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash\hyphenpenalty=10000\exhyphenpenalty=10000}p{#1}}
+\begin{document}
+\begin{tabular}{|c|l|l|L{10.4cm}|}
+\hline
+\textbf{Dim} & \textbf{Name} & \textbf{Scaled units} & \textbf{What it does} \\
+\noalign{\global\arrayrulewidth=1.2pt}\hline\noalign{\global\arrayrulewidth=0.4pt}
+0 & $\Delta x$   & meters $(\times 0.5)$  & TCP displacement along the robot base frame's $x$ axis, added to the current TCP position \\ \hline
+1 & $\Delta y$   & meters $(\times 0.5)$  & Same, $y$ axis \\ \hline
+2 & $\Delta z$   & meters $(\times 0.5)$  & Same, $z$ axis (up) \\ \hline
+3 & $\omega_x$   & radians $(\times 0.5)$ & Orientation displacement: $x$ component of an axis--angle vector composed with the current TCP orientation \\ \hline
+4 & $\omega_y$   & radians $(\times 0.5)$ & Same, $y$ component \\ \hline
+5 & $\omega_z$   & radians $(\times 0.5)$ & Same, $z$ component \\ \hline
+6 & gripper      & sign only              & Positive opens the fingers (0.04\,m), negative closes them (0.0\,m); the magnitude is discarded \\ \hline
+\end{tabular}
+\end{document}

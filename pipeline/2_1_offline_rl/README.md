@@ -131,16 +131,16 @@ precomputed subset *and* its successor row has to be gathered at `+stride`, whic
 
 ## Run
 
-    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/bc/train.py       # baseline
-    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/iql/train.py
-    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/cql/train.py
-    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/td3_bc/train.py
+    python pipeline/2_1_offline_rl/bc/train.py       # baseline
+    python pipeline/2_1_offline_rl/iql/train.py
+    python pipeline/2_1_offline_rl/cql/train.py
+    python pipeline/2_1_offline_rl/td3_bc/train.py
 
 One run at a time: each one holds a 128-env camera evaluation env, and two Isaac jobs at once have
-OOM-killed the Spark. The four-algorithm comparison below was a single detached container looping over
+OOM-killed the host. The four-algorithm comparison below was a single detached container looping over
 seeds and algorithms, exactly one training process alive at any moment.
 
-Useful overrides: `seed=`, `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,noisy_v3c]`,
+Useful overrides: `seed=`, `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,beginner_v3c]`,
 `data.proportions=[...]`, `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]`
 (the deployable image+proprio variant; `belt` — the bowl's pose — is the one further group a real cell
 might supply from a belt encoder), `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
@@ -148,7 +148,7 @@ any `loss.*` key of the algorithm (IQL's `expectile`/`temperature`, CQL's `num_r
 TD3+BC's `alpha`/`policy_update_delay`), `run.name=`, `logger.backend=null`. Stop a run cleanly (final
 checkpoint + evaluation) with
 
-    ssh spark 'docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"'
+    docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"
 
 ## Where results land
 
@@ -291,7 +291,7 @@ no-op — the clean control returns the very same tensors, not "noise with sigma
 `tests/unit/test_offline.py` pins down along with the shapes, the dtypes, the [0, 255] image range and the
 fact that proprio noise lands on exactly the sensor entries.
 
-    ./scripts/spark.sh --detach python pipeline/2_1_offline_rl/robustness.py \
+    python pipeline/2_1_offline_rl/robustness.py \
         checkpoint=/workspace/artifacts/students/bc_expert_proprio_s0/checkpoints/bc_final.pt num_envs=256
 
 **The conditions** (severities in the units the sensor has, not abstract levels):
@@ -393,7 +393,7 @@ visited. That is the next thing to measure.
 
 ### CQL — parked, not part of the comparison
 
-**Parked at the user's decision, not abandoned because it was hard.** The code
+**Parked deliberately, not abandoned because it was hard.** The code
 (`cql/{train.py,utils.py,config.yaml}`), its unit tests and its place in the simulator smoke test all stay,
 so it can be picked up again on a dataset with action diversity. What was found, for whoever does that:
 

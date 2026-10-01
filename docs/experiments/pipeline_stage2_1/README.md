@@ -1,5 +1,10 @@
 # Stage 2.1 — offline RL from the camera shards (first runs)
 
+> Historical record of the first two students, kept for the curves. These read **images only**, which
+> later turned out to be the bottleneck, and they mixed in the `medium` tier. The current result — three
+> algorithms, three seeds, images **plus proprioception** — is in
+> [`pipeline/2_1_offline_rl/README.md`](../../../pipeline/2_1_offline_rl/README.md).
+
 Two camera-only students trained on `expert_v3c` + `medium_v3c` (50/50, 2,014,214 legal transitions),
 150,000 gradient steps at batch 256, online evaluation every 10,000 steps over 128 fresh camera envs.
 Protocol, per-evaluation numbers and the reading of the curves: `pipeline/2_1_offline_rl/README.md`.
@@ -14,6 +19,6 @@ Protocol, per-evaluation numbers and the reading of the curves: `pipeline/2_1_of
 
 Regenerate the figure from the run manifests:
 
-    ./scripts/spark.sh python docs/experiments/pipeline_stage2_1/plot_curves.py \
+    python docs/experiments/pipeline_stage2_1/plot_curves.py \
         /workspace/artifacts/students/bc_expert_medium_v1 /workspace/artifacts/students/iql_expert_medium_v1 \
         out=/workspace/artifacts/students/stage2_1_success_rate.png

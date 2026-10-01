@@ -4,14 +4,14 @@ PPO from robot state (`proprio`), bowl pose (`belt`) and food pose + grasp flag 
 with a dense simulator-only reward (`env.reward_set`, default `simple_v2`: reach, grasp, lift, transport,
 food released in the bowl and success, no penalties). Its checkpoints are the experts stage 1 records camera datasets from.
 
-## Run (DGX Spark)
+## Run
 
-    ./scripts/spark.sh --detach python pipeline/0_state_teacher/train.py
-    ./scripts/spark.sh --detach python pipeline/0_state_teacher/train.py env.reward_set=staged_v1 +env.reward_weights.grasp=4.0
+    python pipeline/0_state_teacher/train.py
+    python pipeline/0_state_teacher/train.py env.reward_set=staged_v1 +env.reward_weights.grasp=4.0
 
 Stop gracefully (final checkpoint, evaluation and video are still written):
 
-    ssh spark 'docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"'
+    docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"
 
 Early stopping (`early_stop.success_rate`) reads the background worker's **evaluation** success rate, not the
 training one: it stops once `early_stop.consecutive_evals` (4) evaluations in a row reach the threshold, so it
@@ -81,7 +81,7 @@ A production line instead of episodes, as a video and an evaluation (1 env, came
 
 ## Scaling benchmark
 
-    ./scripts/spark.sh --detach python pipeline/0_state_teacher/benchmark.py
+    python pipeline/0_state_teacher/benchmark.py
 
 See `docs/experiments/pipeline_stage0/benchmark/`.
 Selected (2026-09-18): 32,768 envs, rollout 16, minibatch 32,768, `loss.shifted_gae=true` -> ~270 M frames/hour

@@ -4,7 +4,7 @@
   at d98db30, which has the same measuring code before the grid was trimmed).
 - Machine: DGX Spark (NVIDIA GB10), 121.7 GB unified memory. Budget = 0.8 x 121.7 - 11 GB reserve = 86.4 GB. The
   reserve is for the teacher's background checkpoint worker (render 8.8 GB + eval 4.1 GB measured, not at the same time).
-- Command: `./scripts/spark.sh --detach python pipeline/0_state_teacher/benchmark.py out=outputs/benchmark_state reserve_gb=11`
+- Command: `python pipeline/0_state_teacher/benchmark.py out=outputs/benchmark_state reserve_gb=11`
 - Files: `benchmark.csv` (every row), `summary.json` (selection), `benchmark.png`.
 - Wall-clock: 1 h 43 min. All rows `ok`, 0 PhysX errors, no memory-guard kills.
 

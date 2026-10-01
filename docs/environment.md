@@ -192,20 +192,16 @@ vector. Both reset on the done row under native auto-reset, so a finished episod
 `data["episode_reward_terms"] + data["next", "reward_terms"]`.
 
 `transport`/`transport_fine` used to pay out on `grasped_mask` alone (food near the TCP, fingers stopped
-between open and closed), with no lift required. Run 1 (27.8 M frames, see
-`docs/experiments/ppo_pixels_run1/`) exploited this: the policy shepherded the food between its fingers on
-the table to farm the weight-10 `transport` term instead of actually lifting it, and `grasp_lift` never rose
-above noise. Task 13 gates both terms on the same `held = grasped & (food_z > lift_height)` condition
-`grasp_lift` already used, so a non-grasp pays nothing.
+between open and closed), with no lift required. An early run exploited this over 27.8 M frames: the policy
+shepherded the food between its fingers along the table to farm the weight-10 `transport` term instead of
+lifting it, and `grasp_lift` never rose above noise. Both terms are now gated on the same
+`held = grasped & (food_z > lift_height)` condition `grasp_lift` already used, so a non-grasp pays nothing.
 
 ## Parameters
 
 Configure through constructor kwargs, e.g.
 `FoodCellEnvCfg(cameras=False, privileged_information=True, belt=BeltCfg(speed=0.1))`, or through the
 `env:` section of an algorithm's Hydra config.
-
-The randomization ranges used for the first pixel PPO run are drawn to scale in
-![DR ranges](media/ppo_pixels_run1_dr_ranges.png).
 
 ### `FoodCellEnvCfg`
 

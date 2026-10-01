@@ -1,5 +1,5 @@
 # Pixel PPO (run 1): actor and critic see only robot state (proprio) and the two frame-stacked cameras.
-# Scale settings marked "benchmark" come from docs/experiments/ppo_pixels_run1/benchmark.
+# Scale settings marked "benchmark" come from a camera-scale sweep with scripts/benchmark_pixels.py.
 env:
   task: FoodRobot-Cell-v0
   num_envs: 512              # benchmark
@@ -80,7 +80,7 @@ eval:
 logger:
   backend: wandb             # wandb | csv | tensorboard | null
   project_name: food_robot
-  group: ppo_pixels_run1
+  group: ppo_pixels
   exp_name: ppo_pixels
 
 checkpoint:

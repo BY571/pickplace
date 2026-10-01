@@ -1,5 +1,5 @@
 # Stage 0 — privileged state teacher (PPO from robot state + bowl pose + food pose; cameras off).
-# Values marked "benchmark" are set by Task 6 from docs/experiments/pipeline_stage0/benchmark.
+# Values marked "benchmark" come from the scaling sweep in docs/experiments/pipeline_stage0/benchmark.
 env:
   task: FoodRobot-Cell-v0
   num_envs: 32768            # benchmark (docs/experiments/pipeline_stage0/benchmark)

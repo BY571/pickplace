@@ -52,14 +52,14 @@ Example: `python ppo.py env.cameras=true env.num_envs=256 'network.actor_in_keys
 ## Pixels (`ppo_pixels.py`)
 
 PPO from the two cameras (3 stacked frames each) plus robot state only — no privileged food state and no belt
-bowl position — with geometric domain randomization of the supply bowl, bowl arrival time and lateral offset
-(see `docs/media/ppo_pixels_run1_dr_ranges.png`). Actor and critic are separate networks with the same
+bowl position — with geometric domain randomization of the supply bowl, bowl arrival time and lateral
+offset. Actor and critic are separate networks with the same
 structure: one CNN per camera (32/64/64 channels, kernels 8/4/3, strides 4/2/1 → 256), proprio → Linear 128 +
 LayerNorm + ELU, fused by an MLP 512-256. Camera frames are stored as uint8 in the replay buffer.
 
     python sota-implementations/ppo/ppo_pixels.py
 
-Config: `config_pixels.yaml` (scale settings from the benchmark in `docs/experiments/ppo_pixels_run1`).
+Config: `config_pixels.yaml`.
 `reward_scale` scales the rewards used for GAE and the loss; logged returns are unscaled.
 
 Render a checkpoint (scene camera + the policy's camera inputs):

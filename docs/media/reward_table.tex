@@ -1,0 +1,28 @@
+\documentclass[border=12pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{ragged2e}
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash\hyphenpenalty=10000\exhyphenpenalty=10000}p{#1}}
+\newcommand{\headrule}{\noalign{\global\arrayrulewidth=1.2pt}\hline\noalign{\global\arrayrulewidth=0.4pt}}
+\begin{document}
+\begin{tabular}{|l|r|L{6.0cm}|L{5.6cm}|}
+\hline
+\textbf{Term} & \textbf{Weight} & \textbf{Paid while} & \textbf{Value} \\
+\headrule
+\texttt{reach\_food}  & $+1$    & always & $1-\tanh(d/0.3)$, $d$ = tool to item \\ \hline
+\texttt{grasp}        & $+2$    & the fingers are closed on the item & $1$ \\ \hline
+\texttt{grasp\_lift}  & $+5$    & grasped \emph{and} lifted above 10\,cm & $1$ \\ \hline
+\texttt{transport}    & $+10$   & the item is held (grasped and lifted) & $1-\tanh(d/0.3)$, $d$ = item to a point above the bowl \\ \hline
+\texttt{food\_in\_bowl} & $+20$ & the item is inside the bowl \emph{and} released & $1$ \\ \hline
+\texttt{return\_home} & $+10$   & after release, on the way home & $1-\tanh(d/0.4)$, $d$ = tool to its home pose \\
+\headrule
+\texttt{success}      & $+150$  & once, on the step the episode succeeds & $1$ (one-shot, not per second) \\
+\headrule
+\texttt{bowl\_disturbance} & $-10$ & always & meters the bowl was pushed off the pallet \\ \hline
+\texttt{action\_rate} & $-0.01$  & always & $\lVert a_t - a_{t-1}\rVert^2$ \\ \hline
+\texttt{joint\_vel}   & $-0.001$ & always & $\lVert \dot{q}\rVert^2$ \\
+\hline
+\end{tabular}
+\end{document}

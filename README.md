@@ -43,6 +43,16 @@ item and the bowl have to be found in the pixels:
 
 <p align="center"><img src="docs/media/obs_table_student.png" alt="Student observation: two 84x84x3 camera images plus 34-dimensional proprioception" width="760"></p>
 
+The reward is simulator-only scaffolding — it shapes the teacher, and nothing in it has to exist on a real
+robot. Ten active terms, with the weights forming a ladder along the task (1 → 2 → 5 → 10 → 20) so no stage
+is ever worth lingering in:
+
+<p align="center"><img src="docs/media/reward_table.png" alt="The simple_v3b reward set: ten terms, their weights and the condition each one pays under" width="820"></p>
+
+The environment emits all 13 terms of its vocabulary **unweighted**, as a vector; a reward set
+(`pickplace/reward_sets/*.yaml`) supplies the weights, and the recorded datasets store the vector — so a
+dataset can be relabelled under a different reward without re-simulating anything.
+
 ## Pipeline
 
 Each stage reads the previous stage's artifacts by path and writes its own with a JSON manifest, so any

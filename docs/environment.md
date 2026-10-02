@@ -8,6 +8,10 @@ the bowl leaves the zone — without knocking the bowl over or off the belt.
 - TorchRL: `pickplace.torchrl_env.make_env(cfg)` → `TransformedEnv(IsaacLabWrapper(...))`
 - Control rate: 50 Hz (`sim.dt = 0.01`, `decimation = 2`)
 
+![The cell: Franka arm, supply tray with the food item, and a bowl riding the conveyor](media/cell_overview.png)
+
+Re-render this view (or any other) with `scripts/render_scene_stills.py`.
+
 ## Layout (cell frame = env origin, meters)
 
 ```
@@ -62,6 +66,11 @@ that term. Two things to keep in mind when reading it:
 ## Observations
 
 All groups are nested (`concatenate_terms=False`), so TorchRL keys look like `("proprio", "ee_pos")`.
+
+![The two camera observations: overview_rgb and wrist_rgb, 84x84 upscaled](media/student_views.png)
+
+*What a camera policy actually gets: `overview_rgb` (left) and `wrist_rgb` (right), 84 × 84 × 3 uint8 each,
+shown upscaled with nearest-neighbour. Same instant as the photo above.*
 
 | Group | Present when | Term | Shape (Franka) | Meaning |
 |---|---|---|---|---|

@@ -268,14 +268,12 @@ def test_pixelnet_forward_with_extra_raw_vector_for_a_qvalue_head():
 # --------------------------------------------------------------------------------------------------
 
 OFFLINE_DIR = Path(__file__).resolve().parents[2] / "pipeline" / "2_1_offline_rl"
-ALGORITHMS = ("bc", "cql", "iql", "td3_bc")
+ALGORITHMS = ("bc", "iql", "td3_bc")
 # One camera and one vector group, both tiny: this asserts the loss wiring, not what is learned.
 ALGO_SHAPES, ACTION_DIM = ((8, 8, 3), (4,)), 3
 ALGO_KEYS = (("pixels", "wrist_rgb"), ("proprio",))
 EXPECTED_LOSSES = {
     "bc": {"loss_bc"},
-    # loss_alpha_prime only exists under the Lagrange variant, which this setting does not use.
-    "cql": {"loss_actor", "loss_actor_bc", "loss_qvalue", "loss_cql", "loss_alpha"},
     "iql": {"loss_actor", "loss_qvalue", "loss_value"},
     "td3_bc": {"loss_qvalue", "loss_actor", "bc_loss", "lmbd"},
 }
@@ -317,9 +315,8 @@ def _algo_batch(batch_size=4):
 
 @pytest.mark.parametrize("name", ALGORITHMS)
 def test_make_algo_takes_gradient_steps_and_reports_its_losses(name):
-    # CQL's actor warm-up ends after 2 steps, TD3+BC's actor updates on step 2: 3 steps cover both branches.
-    overrides = {"policy_eval_start": 2} if name == "cql" else {}
-    cfg = _algo_cfg(name, **overrides)
+    # TD3+BC's actor updates on step 2 (policy_update_delay), so 3 steps cover the delayed branch too.
+    cfg = _algo_cfg(name)
     algo = _load_algo_module(name).make_algo(cfg, ALGO_SHAPES, ALGO_KEYS, ACTION_DIM, torch.device("cpu"))
     before = [p.detach().clone() for p in algo.policy.parameters()]
 
@@ -358,14 +355,14 @@ def test_only_td3_bc_gets_a_deterministic_actor():
     assert torch.equal(td3_actor(batch.clone()).get("action"), td3_actor(batch.clone()).get("action"))
 
     for name, actor in (("bc", algos["bc"].policy),
-                        ("iql", algos["iql"].loss_module.actor_network),
-                        ("cql", algos["cql"].loss_module.actor_network)):
+                        ("iql", algos["iql"].loss_module.actor_network)):
         assert hasattr(actor, "get_dist"), f"{name} extracts its policy from a distribution"
 
 
 def test_the_actor_scale_floor_is_honoured():
-    """CQL learns a SAC entropy temperature against ``target_entropy = -action_dim``; without a floor the
-    cloned scale collapses far below it and the temperature diverges. The floor must actually bind."""
+    """An algorithm that learns a SAC entropy temperature against ``target_entropy = -action_dim`` needs a
+    floor on the actor's scale, or the cloned scale collapses below the target and the temperature
+    diverges. Nothing here uses it today, but the floor must actually bind when asked for."""
     from pickplace.offline import make_actor
 
     batch = _algo_batch(batch_size=6).select(*ALGO_KEYS)

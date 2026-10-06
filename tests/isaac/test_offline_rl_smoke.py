@@ -94,7 +94,6 @@ def _train(algorithm: str, tmp_path: Path, *overrides, timeout=2400):
 @pytest.mark.parametrize(("algorithm", "losses"), [
     ("bc", ["train/loss_bc"]),
     ("iql", ["train/loss_actor", "train/loss_qvalue", "train/loss_value"]),
-    ("cql", ["train/loss_actor", "train/loss_qvalue", "train/loss_cql", "train/loss_alpha"]),
     ("td3_bc", ["train/loss_actor", "train/loss_qvalue", "train/bc_loss"]),
 ])
 def test_offline_trainer_trains_evaluates_and_checkpoints(algorithm, losses, tmp_path):

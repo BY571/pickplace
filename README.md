@@ -155,6 +155,10 @@ and stopped cleanly — final checkpoint and evaluation — with SIGTERM:
     docs/                 environment reference, experiment reports, media
     tests/                unit tests (no simulator) and Isaac tests (slow)
 
+## License
+
+MIT, see [LICENSE](LICENSE). The published dataset is CC BY 4.0.
+
 ## Reproducibility
 
 All numbers in this repository were measured on an NVIDIA DGX Spark (GB10, 121 GB unified memory) with

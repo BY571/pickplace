@@ -1,559 +1,203 @@
 # Stage 2.1 · offline RL from the camera shards
 
 Train a **deployable student** on the shards recorded in stage 1, with no simulator in the loop except for
-evaluation. Four algorithms live here — **BC**, **IQL**, **TD3+BC** and **CQL** — sharing one runner, one
-set of networks, one data mix and one evaluation protocol, so that the only thing that differs between rows
-of the results table is the objective. The comparison below is the first three; **CQL is parked** (it does
-not learn on zero-action-noise data — see "CQL — parked" for the investigation and what to retry).
+evaluation. Four algorithms share one runner, one set of networks, one data mix and one evaluation
+protocol, so the only thing that differs between rows of the results table is the objective: **BC**, **IQL**
+and **TD3+BC** are compared below, **CQL is parked** (it does not learn on zero-action-noise data, see the
+end of this file).
 
-## The comparison protocol
-
-Every algorithm in this folder gets the same everything except its loss:
+## Protocol
 
 | | |
 |---|---|
-| **Data** | `expert_v3c` + `medium_v3c`, 50/50 rows per batch (2,014,214 legal transitions, 14,333 of them terminal) |
-| **Student inputs** | **image only** by default — `("pixels","overview_rgb")` and `("pixels","wrist_rgb")`, 84x84x3 uint8, **one frame each**. No proprioception, no privileged state, no bowl pose. Configurable via `network.in_keys` (group names or leaf keys, expanded with `pickplace.keys.expand_in_keys`); vector groups go through an MLP branch and concatenate with the CNN features (`pickplace.offline.PixelNet`, same shape as `sota-implementations/ppo/utils_pixels.py::PixelsNet`). |
-| **Networks** | one Nature-CNN encoder per camera (32/64/64 channels, 8/4/3 kernels, 4/2/1 strides, 256-d embedding) → fusion MLP `[512, 256]`. Separate encoders per head (actor, each Q, V). |
-| **Batch** | 256 transitions |
-| **Budget** | 150,000 gradient steps (~19 passes over the data) |
-| **Evaluation** | every 10,000 gradient steps: 128 fresh camera envs, deterministic policy, `max_episode_length + 1` steps, each env's **first** finished episode scored — byte-for-byte the protocol `pipeline/0_state_teacher/evaluate.py` used to score the teacher, so student and teacher numbers compare directly |
+| **Data** | `expert_v3c` (1 M frames, ~1 M legal transitions). Tiers mix by rows per batch via `data.shards` / `data.proportions`. |
+| **Student inputs** | both cameras (84×84×3 uint8, one frame each) plus `proprio`. No privileged state, no bowl pose. |
+| **Networks** | one Nature-CNN encoder per camera (32/64/64, kernels 8/4/3, strides 4/2/1, 256-d) plus an MLP branch for the vector groups → fusion MLP `[512, 256]`. Separate encoders per head (actor, each Q, V). |
+| **Budget** | 100,000 gradient steps, batch 256, Adam at `lr 3e-4`, grad-norm clip 10 |
+| **Evaluation** | every 10,000 steps: 128 fresh camera envs, deterministic policy, each env's **first** finished episode scored. Byte-for-byte the protocol that scored the teacher, so the numbers compare directly. |
 | **Reward** | scaled by 0.1 before the loss (BC ignores it) |
 
-`tests/unit/test_offline_configs.py` asserts that the shared block of every `config.yaml` in this folder is
-identical, so the protocol cannot drift between algorithms by accident. The committed defaults are the
-image-only, expert+medium, 150 k-step protocol the first runs used; the comparison below overrides the
-data, the inputs and the budget on the command line, identically for every algorithm.
+`tests/unit/test_offline_configs.py` asserts the shared block of every `config.yaml` here is identical, so
+the protocol cannot drift between algorithms by accident.
 
-**The student has to infer arm and gripper state from pixels.** Nothing in its input says where the joints
-are, whether the gripper is open or whether the food is held — that has to come out of the wrist view (the
-overview camera mostly supplies the bowl's position on the belt). This is the interesting part of the
-setting and the main reason a camera-only student is expected to fall short of the privileged teacher.
-
-## What each algorithm adds, and where its hyperparameters come from
-
-Every algorithm uses `pickplace.offline`'s networks (`make_actor` / `make_qvalue` / `make_value`), Adam at
-`lr 3e-4`, and gradient clipping at norm 10 — the same optimizer for all four, so the objective is the only
-difference. Defaults come from TorchRL's own `sota-implementations` configs; the deviations are listed.
-
-| | Objective | Hyperparameters (all in `<algo>/config.yaml`) |
-|---|---|---|
-| **BC** | maximise the log-probability of the dataset action under the TanhNormal actor | none beyond the optimizer |
-| **IQL** | expectile value loss + advantage-weighted policy (`IQLLoss`) | `expectile 0.7`, `temperature 3.0`, twin Q, `target_tau 0.005` |
-| **TD3+BC** | TD3 with the actor's Q term rescaled so a BC term stays comparable to it (`TD3BCLoss`) | `alpha 0.025` (measured, not copied), `policy_noise 0.2`, `noise_clip 0.5`, `policy_update_delay 2`, twin Q, `target_tau 0.005` |
-| CQL *(parked)* | SAC actor + a conservative log-sum-exp penalty on out-of-distribution actions (`CQLLoss`) | `temperature 1.0`, `num_random 2`, `min_q_weight 0.1` with the Lagrange dual off, `actor_scale_lb 0.1`, `policy_eval_start 4_000` |
-
-**CQL** *(parked — kept here so the config is reproducible).* `temperature 1.0`, `max_q_backup false` and
-`deterministic_backup false` are `sota-implementations/cql/offline_config.yaml`. The entropy weight
-(`alpha`) is not pinned: as in the sota script it is learned from `alpha_init 1.0` against
-`target_entropy "auto"` (= −action_dim), which is why the config has no `alpha` entry. Four deviations, two
-of them forced by failures documented under "CQL — parked": `with_lagrange false` with
-`min_q_weight 0.1` (the dual let the critic run away to Q ≈ −14,000), `actor_scale_lb 0.1` (matching the
-sota's `model.scale_lb`, without which the entropy temperature diverges), and:
-
-* **`num_random 2`, not 10.** The conservative penalty evaluates `3 × num_random × batch` state-action
-  pairs through both Q nets on every gradient step. With an MLP over a state vector — the sota's setting —
-  that is nearly free; with a Nature CNN per camera it re-encodes 84 px images and becomes the entire cost
-  of the run. Measured on the Spark at batch 256 with image+proprio inputs: **8.4 / 5.2 / ~2.4 gradient
-  steps per second at `num_random` 2 / 4 / 10**, i.e. **3.3 h / 5.3 h / ~11.5 h per 100 k-step run**,
-  against 22 steps/s for IQL and 35 for TD3+BC. `num_random 2` is the largest value that keeps three seeds
-  inside the grid's wall clock, and it is the one number to raise first when CQL is picked up again.
-* **`policy_eval_start 4_000`, not 40 000.** The sota warm-starts the actor on the behaviour-cloning term
-  for the first 40 k of its 1 M gradient steps; 4 k is the same 4% of our 100 k budget.
-
-`loss_function smooth_l1` rather than the sota's `l2`, for the reason IQL already uses it here: `l2` needs
-about ten times the gradient norm for the same fit on this reward scale.
-
-**TD3+BC.** `policy_noise 0.2`, `noise_clip 0.5`, `policy_update_delay 2` and `target_tau 0.005` (the
-sota's `target_update_polyak 0.995`) are `sota-implementations/td3_bc/config.yaml` unchanged — the paper's
-values. Again `smooth_l1` instead of `l2`. The sota's `adam_eps 1e-4` is *not* adopted: keeping one
-optimizer across the algorithms matters more here than one algorithm's epsilon. TD3+BC is the one
-algorithm that cannot use the shared stochastic actor — `TD3BCLoss` reads `action` straight out of the
-actor and adds the target-policy smoothing noise itself — so it uses
-`pickplace.offline.make_deterministic_actor`: the same `PixelNet` body with a tanh head instead of a
-TanhNormal distribution. `tests/unit/test_offline.py::test_only_td3_bc_gets_a_deterministic_actor` pins
-that, because handing `TD3BCLoss` the stochastic actor would run, train and checkpoint without any error
-while making its policy extraction meaningless.
-
-* **`alpha 0.025`, not the paper's 2.5 — and this is the one number that had to be measured rather than
-  copied.** `alpha` sets the Q-vs-BC balance: the loss scales the Q term by `lambda = alpha / mean|Q|`.
-  On `expert_v3c` the paper's value gives **0.000 success for 60 k gradient steps** and 0.109 at 100 k.
-  The reason is the data, not the loss (whose TD target, terminal masking and successor lookup were
-  checked against a hand computation): `expert_v3c` has `noise_sigma = 0.0`, one deterministic teacher
-  rolled out, so **every state in it was visited with exactly one action** and `Q(s, ·)` has no
-  counterfactual to fit. Measured on a trained critic, `Q` varies by ±40 across states and by about **2**
-  across actions — yet TD3+BC's own `alpha / mean|Q|` normalisation makes that action-blind gradient
-  exactly as large as the BC gradient (0.0277 vs 0.0281), so half the actor's gradient is noise and the
-  action MSE comes out 63× worse than BC's. Sweep at 20 k gradient steps, same protocol:
-
-  | Data | `alpha` | 5 k | 10 k | 15 k | 20 k |
-  |---|---|---|---|---|---|
-  | `expert_v3c` | 2.5 (paper) | 0.000 | 0.000 | 0.000 | 0.000 |
-  | `expert_v3c` | 0.25 | 0.016 | 0.102 | 0.227 | 0.227 |
-  | `expert_v3c` | **0.025** | **0.680** | **0.719** | 0.617 | 0.648 |
-  | `noisy_v3c` (`noise_sigma 0.2`) | 2.5 | 0.000 | 0.000 | 0.359 | 0.242 |
-
-  Both knobs move the same way — shrinking `alpha` switches the noisy Q gradient off, and *adding action
-  noise to the data* helps at the paper's `alpha` — which is the signature of a missing counterfactual in
-  the data rather than of a misconfigured loss. Note the reward scale is not involved: `alpha / mean|Q|`
-  is scale-invariant, so the shared `reward_scale 0.1` cancels out of the balance. **On a dataset with
-  action noise, `alpha` should go back up towards 2.5.**
-
-**One wiring fix worth knowing about.** `CQLLoss` cannot be handed nested observation keys: it repeats the
-observation once per sampled action with `tensordict.named_apply`, which matches on *leaf* names, so
-`("pixels", "wrist_rgb")` never matches the actor's `in_keys` and is silently dropped from the repeated
-tensordict. `cql/utils.py` therefore aliases the shard's nested keys onto flat ones (a view, not a copy) and
-evaluates that aliasing module together with the actor. Nothing else in the folder is affected.
-
-## Transitions: what a "pair of rows" is
-
-A shard stores one row per env step, time-major, and **does not store next observations**. So the successor
-state of row `i` is row `i + successor_stride` (the collection's `num_envs`, 512). `pickplace.offline`
-precomputes the legal pairs once per shard as an index tensor (never a per-batch scan):
-
-* **ongoing** — row `i` has no done flag and `i + stride` is inside the shard → `next_obs` is row `i + stride`,
-  `terminated = False`.
-* **terminal** — row `i` is `terminated` and not `truncated` → the episode ended here, so the bootstrap is
-  masked (`terminated = True`) and `next_obs` is a placeholder (row `i` itself) multiplied by zero in the TD
-  target. **These pairs are kept on purpose**: with `simple_v3b` the success bonus is 150 of a ~182 mean
-  episode return, so dropping terminal rows would hide 80%+ of the reward from any value-based method.
-  Set `data.include_terminals=false` to drop them anyway.
-* **truncated** rows are dropped — the episode did not end, but its next observation genuinely is not in the
-  shard, so neither bootstrapping nor masking would be right.
-
-No pair ever spans an episode boundary. `tests/unit/test_offline.py` pins this down on a synthetic shard with
-known boundaries: the exact legal index set, the successor row, the terminal flags, and the fact that every
-sampled pair is one of the legal ones.
-
-Tier mixing is a fixed number of rows per shard per batch (largest-remainder split of `batch_size` by
-`data.proportions`), concatenated — not `ReplayBufferEnsemble`, because a shard's legal rows are a
-precomputed subset *and* its successor row has to be gathered at `+stride`, which no stock sampler expresses.
+Teacher reference under the same protocol: **0.984**. Evaluation noise at 128 episodes is ±0.019 near the
+ceiling, so **differences under about 0.04 are not differences**.
 
 ## Run
 
-    python pipeline/2_1_offline_rl/bc/train.py       # baseline
-    python pipeline/2_1_offline_rl/iql/train.py
-    python pipeline/2_1_offline_rl/cql/train.py
-    python pipeline/2_1_offline_rl/td3_bc/train.py
+    python pipeline/2_1_offline_rl/bc/train.py        # also: iql, td3_bc, cql
+    docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"   # stop, keeping a final checkpoint
 
-One run at a time: each one holds a 128-env camera evaluation env, and two Isaac jobs at once have
-OOM-killed the host. The four-algorithm comparison below was a single detached container looping over
-seeds and algorithms, exactly one training process alive at any moment.
+One run at a time: each holds a 128-env camera evaluation env, and two Isaac jobs at once have OOM-killed
+the host.
 
-Useful overrides: `seed=`, `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c,beginner_v3c]`,
-`data.proportions=[...]`, `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]`
-(the deployable image+proprio variant; `belt` — the bowl's pose — is the one further group a real cell
-might supply from a belt encoder), `eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`,
-any `loss.*` key of the algorithm (IQL's `expectile`/`temperature`, CQL's `num_random`/`lagrange_thresh`,
-TD3+BC's `alpha`/`policy_update_delay`), `run.name=`, `logger.backend=null`. Stop a run cleanly (final
-checkpoint + evaluation) with
+Useful overrides: `seed=`, `gradient_steps=`, `batch_size=`, `data.shards=[expert_v3c,medium_v3c]`,
+`data.proportions=[...]`, `network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]`,
+`eval.interval=`, `eval.num_envs=`, `checkpoint.interval=`, `optim.lr=`, any `loss.*` key of the algorithm,
+`run.name=`, `logger.backend=null`.
 
-    docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"
+Results land in `$FOOD_ROBOT_ARTIFACTS/students/<run>/`: `manifest.json` (git commit, config, per-shard
+provenance, `eval_history`, `best_eval`), `checkpoints/<algo>_<step>.pt` with a sidecar `.json` carrying
+that checkpoint's own evaluation and sha256, and the stdout stream `RUN_INFO` / `METRICS` / `EVAL` /
+`CHECKPOINT` / `STOP_REASON`.
 
-## Where results land
-
-`$FOOD_ROBOT_ARTIFACTS/students/<run>/`:
-
-* `manifest.json` — git commit, full config, one provenance block per shard (name, frames, legal
-  transitions, source checkpoint + sha256, reward set and weights, the shard's own success rate), the W&B
-  URL, `eval_history` (one entry per evaluation) and `best_eval`.
-* `checkpoints/<algo>_<step>.pt` + `.json` — the sidecar manifest repeats the git commit, config and shard
-  provenance and adds the **online evaluation at that checkpoint** and the checkpoint's sha256.
-* stdout: `RUN_INFO`, `METRICS {json}` every `log_interval` steps, `EVAL`, `CHECKPOINT`, `STOP_REASON`,
-  `<ALGO>_DONE`.
-
-W&B project `food_robot`, group `offline_rl`.
-
-## Results: the three-algorithm, three-seed comparison
-
-**One protocol, three objectives, three seeds.** `expert_v3c` only,
-`network.in_keys=[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]` (the deployable set: both cameras plus
-the robot's own proprioception), 100,000 gradient steps, batch 256, evaluation every 10 k over 128 fresh
-camera envs, seeds 0/1/2, W&B group `offline_rl`, runs named `<algo>_expert_proprio_s<seed>`. Everything was
-run one at a time in a single detached container. Teacher reference, same evaluation protocol: **0.984**.
+## Results: three algorithms, three seeds
 
 ![Offline-RL algorithms on deployable observations: mean over 3 seeds, min-max band](../../docs/experiments/offline_rl/algorithms.png)
 
-`mean ± half the seed range`. "Late stability" is the standard deviation of the last five evaluations,
-averaged over seeds — lower is steadier. Evaluation noise alone is ±0.019 (binomial standard error at
-p = 0.95 over 128 episodes), so **differences under about 0.04 are not differences**.
+`mean ± half the seed range`. "Late stability" is the standard deviation of the last five evaluations.
 
-| Algorithm | Best | Final | Mean of last 5 | Steps to 0.90 | Late stability (sd) | Wall clock | Seed runs |
-|---|---|---|---|---|---|---|---|
-| **BC** | 0.979 ± 0.008 | 0.948 ± 0.031 | 0.944 ± 0.016 | **20 k ± 10 k** | 0.025 | **0.38 h** | u1dw6agg · hcnamspj · sst10l1f |
-| **IQL** | **0.990 ± 0.012** | **0.953 ± 0.008** | **0.956 ± 0.011** | 27 k ± 15 k | 0.025 | 1.22 h | 29pbjq2u · hb56w7uy · 9uup6qxu |
-| **TD3+BC** (`alpha 0.025`) | 0.958 ± 0.008 | 0.922 ± 0.027 | 0.919 ± 0.019 | 63 k ± 5 k | 0.036 | 0.83 h | eclg2kb9 · u6nau6bv · 9bz3kwr5 |
-| TD3+BC at the paper's `alpha 2.5` | 0.219 | 0.109 | 0.102 | never | 0.090 | 0.83 h | gc76ywhn (seed 0 only — see above) |
+| Algorithm | Best | Final | Mean of last 5 | Steps to 0.90 | Late stability | Wall clock |
+|---|---|---|---|---|---|---|
+| **BC** | 0.979 ± 0.008 | 0.948 ± 0.031 | 0.944 ± 0.016 | **20 k ± 10 k** | 0.025 | **0.38 h** |
+| **IQL** | **0.990 ± 0.012** | **0.953 ± 0.008** | **0.956 ± 0.011** | 27 k ± 15 k | 0.025 | 1.22 h |
+| **TD3+BC** (`alpha 0.025`) | 0.958 ± 0.008 | 0.922 ± 0.027 | 0.919 ± 0.019 | 63 k ± 5 k | 0.036 | 0.83 h |
+| TD3+BC at the paper's `alpha 2.5` | 0.219 | 0.109 | 0.102 | never | 0.090 | 0.83 h |
 
-CQL is **not** in this comparison; it is parked, and the investigation is recorded at the end of this
-section.
+**BC and IQL are the same policy as far as this protocol can tell.** Every gap between them (0.005–0.012)
+is smaller than both the seed spread and the evaluation noise, and their per-seed ranges overlap
+completely, so IQL's nominal lead is not worth 3.2× the wall clock. The difference that *is* real separates
+TD3+BC: steps to 0.90 is the one metric with non-overlapping ranges (BC 10–30 k, IQL 10–40 k, TD3+BC
+60–70 k).
 
-Per-seed numbers (best @ step / final / last-5 mean / last-5 sd / steps to 0.90):
-
-| | seed 0 | seed 1 | seed 2 |
-|---|---|---|---|
-| BC | 0.984 @ 30 k / 0.969 / 0.961 / 0.013 / 20 k | 0.984 @ 80 k / 0.906 / 0.944 / 0.030 / 10 k | 0.969 @ 100 k / 0.969 / 0.928 / 0.031 / 30 k |
-| IQL | 1.000 @ 70 k / 0.945 / 0.945 / 0.043 / 10 k | 0.977 @ 90 k / 0.961 / 0.967 / 0.006 / 40 k | 0.992 @ 90 k / 0.953 / 0.956 / 0.026 / 30 k |
-| TD3+BC | 0.969 @ 80 k / 0.914 / 0.934 / 0.039 / 70 k | 0.953 @ 80 k / 0.898 / 0.925 / 0.021 / 60 k | 0.953 @ 100 k / 0.953 / 0.897 / 0.047 / 60 k |
-
-### Which one would I pick, and do the differences beat the seed spread?
-
-**Pick BC.** On every success metric BC and IQL are the same policy as far as this protocol can tell: best
-0.979 vs 0.990, final 0.948 vs 0.953, last-5 mean 0.944 vs 0.956. Every one of those gaps (0.005–0.012) is
-smaller than the seed spread on that metric (±0.008 to ±0.031) *and* smaller than the ±0.019 evaluation
-noise, and the two algorithms' per-seed ranges overlap completely. IQL is nominally ahead on all three and
-its best seed is the only run to touch 1.000, but "nominally ahead inside the noise" is not a reason to pay
-**3.2× the wall clock** (1.22 h vs 0.38 h per run). Both reach the teacher's 0.984 at their best checkpoint
-and settle a couple of points below it, which is where the earlier single-seed runs already put them.
-
-**The differences that *are* real are speed and stability, and they separate TD3+BC, not BC from IQL.**
-Steps to 0.90 is the one metric with non-overlapping ranges: BC 10–30 k, IQL 10–40 k, TD3+BC **60–70 k**.
-TD3+BC is also the least steady late (0.036 vs 0.025) and lowest on every success metric — its last-5 mean
-0.919 ± 0.019 against BC's 0.944 ± 0.016 is the only success gap that even approaches significance. With a
-ceiling this high, "how fast" is the honest discriminator, and there BC wins outright.
-
-**What this comparison really measured.** Given that the objectives land within noise of each other (or
-below), the useful conclusion is not about the objectives at all: on **zero-action-noise expert
-demonstrations** there is nothing for a value-based method to add. `expert_v3c` was recorded with
-`noise_sigma = 0.0` from a single deterministic teacher, so every state in it was visited with exactly one
-action and `Q(s, ·)` has no counterfactual to fit — measured on a trained critic, Q varies by ±40 across
-states and by about **2** across actions. The four algorithms then sort by **how much they let that
-action-blind Q move the policy**: BC not at all, IQL only as a re-weighting of a cloning term (advantage
-weighting never differentiates through Q), TD3+BC through an explicit Q gradient that has to be turned
-down by 100× to be harmless, and CQL through a Q gradient it has no term to trade against — which is why
-CQL does not learn here at all. **The next experiment is a dataset question, not an algorithm question:
-re-run this grid on data with action noise (`noisy_v3c`, or a re-recorded expert with `noise_sigma > 0`) and
-see whether IQL, CQL and TD3+BC can finally beat cloning instead of merely matching it.**
+**What this really measured.** On zero-action-noise expert demonstrations there is nothing for a
+value-based method to add. `expert_v3c` was recorded from a deterministic teacher, so every state appears
+with exactly one action and `Q(s, ·)` has no counterfactual to fit: on a trained critic Q varies by ±40
+across states and about **2** across actions. The algorithms then sort by how much they let that
+action-blind Q move the policy — BC not at all, IQL only as a re-weighting of a cloning term, TD3+BC
+through an explicit Q gradient that has to be turned down 100×, CQL through a Q gradient it has nothing to
+trade against. The open question is a dataset one, not an algorithm one: whether action-noisy data lets
+these methods beat cloning instead of matching it.
 
 ### Does the student beat its teacher?
 
-The grid above (128-episode evaluations) puts IQL's best *saved* checkpoint at 0.961 and the single best
-*evaluation point* anywhere in the grid at 1.000 (seed 0, step 70 k — an evaluation-only point; no checkpoint
-was saved at 70 k, checkpoints land every 50 k). Either way it reads as "at or above the teacher's 0.984",
-but 128 episodes only pins success rate down to about ±0.019 (95% binomial standard error) — inside the size
-of that gap. Settling it needs a bigger sample.
+No. At 128 episodes IQL's best evaluation point reads 1.000, above the teacher's 0.984, which is why the
+question needed a bigger sample. Re-evaluated at **1000 episodes** (teacher in one pass, students as two
+pooled passes of 500 fresh camera envs):
 
-**Protocol.** Re-evaluated three checkpoints at **1000 episodes** each, deterministic policy,
-`max_episode_length + 1` steps, first finished episode per env scored — the protocol used throughout this
-file and `pipeline/0_state_teacher/evaluate.py`:
-
-* **Teacher** (`teachers/teacher_v3c_20260920T120408Z/checkpoints/ppo_teacher_final.pt`, its own state
-  observations, `pipeline/0_state_teacher/evaluate.py`): **one pass at `num_envs=1000`**. State-only
-  evaluation is cheap (21.5 s for all 1000 envs), so there was no reason to split it.
-* **BC** (`students/bc_expert_proprio_s0/checkpoints/bc_final.pt`) and **IQL**
-  (`students/iql_expert_proprio_s1/checkpoints/iql_final.pt`) — each the best *saved* checkpoint of its best
-  seed (the manifests hold every checkpoint's own eval; see the per-seed table above for how the saved
-  checkpoints compare): **two independent passes of 500 fresh camera envs each (seeds 0 and 1), pooled by
-  exact success count.** This repo's convention (`benchmark.py`) is one Isaac process per measurement rather
-  than growing one process's env count arbitrarily, and a 1000-env camera pass was never exercised anywhere
-  else in the codebase, so repeat-and-pool was the cleaner choice here (the teacher's single-pass state env
-  has no such precedent to worry about either way). `pipeline/2_1_offline_rl/evaluate.py` is a new, small
-  standalone script for this — nothing before it could evaluate one student checkpoint outside a training
-  run.
-
-| | Episodes | Successes | Success rate | 95% CI (Wald) |
+| | Episodes | Successes | Success rate | 95% CI |
 |---|---|---|---|---|
 | Teacher | 1000 | 982 | 0.982 | [0.974, 0.990] |
 | BC (best checkpoint, best seed) | 1000 | 983 | 0.983 | [0.975, 0.991] |
 | IQL (best checkpoint, best seed) | 1000 | 947 | 0.947 | [0.933, 0.961] |
 
-**Verdict: no — the 128-episode "IQL beats the teacher" reading was noise, and at this sample size IQL is
-actually a bit worse.** Teacher vs. BC: 0.982 vs. 0.983, a two-proportion z-test gives **z = −0.17
-(p ≈ 0.86)** — indistinguishable, exactly the "closes 100% of the gap" reading the smaller samples already
-supported. Teacher vs. IQL: 0.982 vs. 0.947, **z = 4.23 (p < 0.0001)** — significant, and in the *opposite*
-direction from the 128-episode grid: IQL's confidence interval sits entirely below the teacher's, not above
-it. The likely explanation is visible in the per-seed table above: IQL's evaluation curve swings by several
-points step to step (late-stability sd 0.025, same as BC's, but on a noisier climb — seed 0's own history
-goes 1.000 @ 70 k then back down to 0.945 by its final checkpoint), so a single 128-episode point anywhere
-near the top of that swing reads as "beats the teacher" without the checkpoint actually being better on
-average. **BC, not IQL, is the one that genuinely matches its teacher — and it does so at a third of the
-training wall clock.**
+Teacher vs BC: z = −0.17, indistinguishable. Teacher vs IQL: **z = 4.23**, significantly worse, in the
+opposite direction from the 128-episode reading. **BC, not IQL, is the one that matches its teacher**, at a
+third of the training wall clock.
+
+    python pipeline/2_1_offline_rl/evaluate.py checkpoint=<student.pt> num_envs=500 seed=0
+
+### Proprioception, not vision, was the bottleneck
+
+![Offline-RL students on deployable observations, by demonstration data](../../docs/experiments/offline_rl/success_rate_by_data.png)
+
+Earlier single-seed runs at a 150 k budget established which inputs were worth shipping. With **image
+only**, BC reaches 0.820 and IQL 0.813 at their best checkpoints, and both oscillate in a 0.4–0.8 band all
+through training. Adding `proprio`, the 34 numbers a real controller already knows, takes BC to 0.984 and
+IQL to 0.992 and removes most of the oscillation. That single change closes essentially the whole gap to
+the teacher, which is why every run in the grid above uses image + proprio.
+
+Runs that consumed the simulator-only `privileged` group reached no higher and were dropped: that
+information has no real-robot equivalent, so it cannot inform a decision about what to ship. `belt` (the
+bowl's pose) is the one further group a real cell might plausibly supply, from a belt encoder or a fixed
+overhead camera, and is untested.
+
+### Episodic success does not predict throughput
+
+Running the same checkpoints on a continuous line — bowls arriving for 120 s, scripted return home between
+placements — inverts the ranking.
+
+![Single item against production line](../../docs/media/production_table.png)
+
+BC has the best single-item score and places half as many items as IQL, which matches the teacher exactly.
+The cause is dropped items: BC loses 9 food items in two minutes and TD3+BC 7, against IQL's 1, and each
+drop costs the bowl plus the recovery time. Execution speed is not the difference; per episode all three
+take about 117 steps. Why cloning-shaped policies drop so much more often here is unexplained — their
+single-item drop rates differ in the same direction (BC 2.7%, IQL 2.0%) but far less than the line
+amplifies them.
+
+    python pipeline/0_state_teacher/demo.py checkpoint=<any.pt> seconds=120 [video=false]
+
+Without the scripted homing every student collapses after one or two cycles (BC 1 placed, IQL 7, TD3+BC 1
+of the same 24 bowls): the state after a placement is one no episodic training ever visited. Multi-cycle
+training is the fix and has not been done.
 
 ### Robustness to degraded observations
 
-**The question.** All three students sit near the teacher on clean observations (1000 episodes: BC 0.983,
-IQL 0.947, teacher 0.982), yet the continuous production demo inverts them — IQL 24 placements / 0 misses
-against BC's 12 / 11 with 9 drops. One plausible explanation is robustness: IQL's advantage-weighted policy
-might generalise, while BC is a sharper fit to the exact training distribution. This experiment tests that
-directly, by degrading what a real deployment degrades and watching who falls off fastest.
+The obvious explanation for the inversion is that IQL generalises and BC is a sharp fit to the training
+distribution. It is wrong. Across 17 conditions at 256 episodes each — image noise, brightness, contrast,
+defocus, occlusion, proprio noise — **BC is the most robust student in four of the six families**, tied in
+the fifth, and tied with IQL in the sixth. Sensor degradation cannot be what flips the two in production.
 
-**What was measured.** `pickplace.offline.ObservationPerturbation` rewrites the observation *after* the env
-produced it and *before* the policy sees it: the policy acts on the degraded copy while the env keeps
-stepping the clean tensordict, so the simulation is bit-for-bit the same run and only the policy's input is
-damaged. No retraining, the same `<algo>_final.pt` checkpoints the videos used (`bc_expert_proprio_s0`,
-`iql_expert_proprio_s1`, `td3_bc_expert_proprio_s2`), and the usual evaluation protocol — deterministic
-policy, `max_episode_length + 1` steps, each env's first finished episode scored — at **256 episodes per
-condition**. `pipeline/2_1_offline_rl/robustness.py` runs all 17 conditions of one algorithm in a single
-Isaac process (the env is built once; Isaac startup costs more than the whole sweep) and reseeds the global
-RNG before each condition, so every condition scores the *same* set of initial states; the perturbation
-draws its own noise from a private generator that never touches the global RNG. Severity 0 is an exact
-no-op — the clean control returns the very same tensors, not "noise with sigma 0" — which
-`tests/unit/test_offline.py` pins down along with the shapes, the dtypes, the [0, 255] image range and the
-fact that proprio noise lands on exactly the sensor entries.
+![Students under degraded observations](../../docs/experiments/offline_rl/robustness.png)
 
-    python pipeline/2_1_offline_rl/robustness.py \
-        checkpoint=/workspace/artifacts/students/bc_expert_proprio_s0/checkpoints/bc_final.pt num_envs=256
+Two findings with deployment consequences: occluding 5% of both camera frames takes every student from
+~0.95 to 0.15–0.26, and the three objectives fail in genuinely different ways (TD3+BC is nearly immune to
+pixel noise and the weakest under blur, the cloning-shaped policies the reverse). Full sweep, all
+conditions and the statistics: [`docs/experiments/offline_rl/robustness.md`](../../docs/experiments/offline_rl/robustness.md).
 
-**The conditions** (severities in the units the sensor has, not abstract levels):
+    python pipeline/2_1_offline_rl/robustness.py checkpoint=<student.pt> num_envs=256
 
-| Family | Severities | What it models |
-|---|---|---|
-| Image noise | additive Gaussian, sigma **2 / 5 / 10 / 20** of 255, clipped | sensor read noise (0.8%–7.8% of range) |
-| Brightness | additive offset **−25 / +25** of 255 | an exposure or ambient-light shift of ±10% of range |
-| Contrast | multiplicative gain **0.9 / 0.8** | a dirty lens or a stopped-down aperture |
-| Defocus | separable Gaussian blur, sigma **0.8 px (3×3)** and **1.5 px (5×5)** on the 84 px frame | a ~1 px and ~2 px circle of confusion |
-| Occlusion | one black square per camera covering **5%** and **15%** of the frame, **both cameras**, position drawn once per sub-env and then fixed | dirt on the lens, a fixture in the way |
-| Proprio noise | joint positions and gripper opening **0.005 / 0.01 / 0.02 rad**, joint velocities **0.05 / 0.1 / 0.2 rad/s**, end-effector position **2 / 5 / 10 mm** | encoder noise |
-| Combined | image sigma 5 + the mid proprio level | the "realistic sensor" |
+## Hyperparameters that are not the published defaults
 
-Proprio noise is scaled per entry type, one severity index across all three: the velocity sigma is the
-joint-position sigma differenced over a 100 ms filter window (5 control steps at the 50 Hz control rate),
-i.e. 10× the position sigma in rad/s, and the end-effector sigma is the position error those joint-angle
-errors produce over a ~0.5 m arm. `ee_quat` (a unit quaternion — perturbing it needs a rotation, not an
-additive sigma) and `last_action` (the policy's own previous output, not a sensor reading) are left alone.
+Defaults come from TorchRL's `sota-implementations` configs. Two deviations are load-bearing.
 
-![Offline-RL students under degraded observations, 256 episodes per condition](../../docs/experiments/offline_rl/robustness.png)
+**TD3+BC `alpha 0.025`, not the paper's 2.5.** `alpha` sets the Q-vs-BC balance (the loss scales the Q term
+by `alpha / mean|Q|`). At 2.5 the policy gets 0.000 success for 60 k steps. The cause is the data, not the
+loss: with one action per state the Q gradient is noise, yet the normalisation makes it exactly as large as
+the BC gradient. Sweep at 20 k steps:
 
-**Success rate per condition, 256 episodes each.** The binomial 95% CI is **±2.7%** near 0.95 and ±5.6%
-near 0.70, so a two-algorithm gap has to clear roughly **6 points** near the ceiling to be a gap at all.
+| Data | `alpha` | 5 k | 10 k | 15 k | 20 k |
+|---|---|---|---|---|---|
+| `expert_v3c` | 2.5 (paper) | 0.000 | 0.000 | 0.000 | 0.000 |
+| `expert_v3c` | 0.25 | 0.016 | 0.102 | 0.227 | 0.227 |
+| `expert_v3c` | **0.025** | **0.680** | **0.719** | 0.617 | 0.648 |
+| action-noisy data (`noise_sigma 0.2`) | 2.5 | 0.000 | 0.000 | 0.359 | 0.242 |
 
-| Condition | BC | IQL | TD3+BC |
-|---|---|---|---|
-| **clean** | **0.973** | 0.934 | 0.930 |
-| image noise sigma 2 | 0.977 | 0.945 | 0.941 |
-| image noise sigma 5 | 0.961 | 0.945 | 0.895 |
-| image noise sigma 10 | 0.941 | 0.891 | 0.941 |
-| image noise sigma 20 | 0.691 | 0.688 | **0.914** |
-| brightness −25 | 0.977 | 0.961 | 0.922 |
-| brightness +25 | **0.973** | 0.895 | 0.879 |
-| contrast gain 0.9 | 0.984 | 0.938 | 0.914 |
-| contrast gain 0.8 | **0.953** | 0.910 | 0.840 |
-| blur sigma 0.8 | 0.953 | 0.926 | 0.875 |
-| blur sigma 1.5 | **0.938** | 0.781 | 0.750 |
-| occlusion 5% | 0.234 | 0.246 | 0.160 |
-| occlusion 15% | 0.016 | 0.043 | 0.035 |
-| proprio 0.005 rad / 2 mm | 0.941 | 0.926 | 0.941 |
-| proprio 0.01 rad / 5 mm | 0.965 | 0.891 | 0.938 |
-| proprio 0.02 rad / 10 mm | **0.902** | 0.812 | 0.855 |
-| combined (sigma 5 + proprio mid) | 0.973 | 0.902 | 0.941 |
+Both knobs move the same way, which is the signature of a missing counterfactual in the data rather than a
+misconfigured loss. **On a dataset with action noise, `alpha` should go back up towards 2.5.**
 
-Occlusion at 5% was the one condition that looked decisive but borderline, so it was re-run on its own at
-**512 episodes**: BC **0.248**, IQL **0.262**, TD3+BC **0.154** (127 / 134 / 79 successes). BC and IQL are
-indistinguishable there (z = 0.4); TD3+BC is genuinely worse than both (z = 3.8 vs BC, 4.3 vs IQL).
+**`loss_function smooth_l1` rather than `l2`** for every value-based algorithm: `l2` needs about ten times
+the gradient norm for the same fit at this reward scale.
 
-**Severity at which each algorithm first drops below 0.80:**
+TD3+BC also cannot use the shared stochastic actor — `TD3BCLoss` reads `action` straight out of it and adds
+the smoothing noise itself — so it gets `make_deterministic_actor`. `tests/unit/test_offline.py` pins that,
+because the wrong actor would train and checkpoint without error while making policy extraction
+meaningless.
 
-| Family | BC | IQL | TD3+BC |
-|---|---|---|---|
-| Image noise | sigma 20 | sigma 20 | **never** (0.914 at sigma 20) |
-| Brightness (±25) | never | never | never |
-| Contrast (gain ≥ 0.8) | never | never | never (0.840 at gain 0.8) |
-| Defocus | **never** (0.938 at sigma 1.5) | sigma 1.5 | sigma 1.5 |
-| Occlusion | 5% | 5% | 5% |
-| Proprio noise | never | never (0.812 at 0.02 rad) | never |
-| Combined | never | never | never |
+### CQL — parked
 
-**Do the differences beat the CI?** Yes, four of them, and they do not point the way the hypothesis did.
+**Parked deliberately, not abandoned because it was hard.** The code, its unit tests and its place in the
+simulator smoke test all stay, so it can be picked up on a dataset with action diversity. Three defects
+were found, two fixed: the SAC entropy temperature diverges when the actor's scale collapses while cloning
+(fixed with `scale_lb 0.1`, as TorchRL's own CQL sota does), the conservative penalty runs the critic to
+Q ≈ −14,000 under the Lagrange dual (mitigated with `min_q_weight 0.1`, dual off), and `CQLLoss` silently
+drops nested observation keys when it repeats the observation per sampled action (worked around in
+`cql/utils.py` by aliasing them onto flat names).
 
-* **Image noise, sigma 20 — TD3+BC is the outlier, and it is the robust one.** BC 0.691 and IQL 0.688 both
-  collapse; TD3+BC holds 0.914, which is 0.983 of its own clean rate. z = 6.6 against either. BC and IQL
-  are identical here (z = 0.07).
-* **Defocus, sigma 1.5 — BC is the robust one.** BC 0.938 against IQL 0.781 (z = 5.3) and TD3+BC 0.750
-  (z = 6.1). The ranking is the exact reverse of the noise panel.
-* **Photometric shifts — BC again.** At gain 0.8, BC 0.953 vs TD3+BC 0.840 (z = 4.3); at offset +25, BC
-  0.973 vs IQL 0.895 (z = 3.6) and vs TD3+BC 0.879 (z = 4.1). All three are nevertheless above 0.84
-  everywhere in this family: brightness and contrast are the perturbations this task cares least about.
-* **Proprio noise — BC again, over IQL.** At 0.02 rad / 0.2 rad/s / 10 mm, BC 0.902 vs IQL 0.812
-  (z = 2.9, p = 0.003); BC vs TD3+BC (0.855) is *not* significant (z = 1.6).
-* **Occlusion — no algorithm survives it, and the differences are small.** 5% of both frames blacked out
-  takes every student from ~0.95 to 0.15–0.26, and 15% to 0.02–0.04. This is by far the most damaging
-  perturbation tested, and it is the one where the three are closest together in relative terms.
-* **Everything else is inside the CI**, including the whole combined "realistic sensor" condition: BC
-  0.973, IQL 0.902, TD3+BC 0.941 — each within noise of its own clean rate. A mid image noise plus a mid
-  proprio noise costs none of the three anything measurable.
+After all of that CQL is still at **0.000 success at every evaluation of an 88 k-step run**. The reason is
+structural: TD3+BC's actor loss is `-lambda*Q + MSE(pi(s), a)`, so `alpha` can switch a useless Q gradient
+off, while **CQL's actor loss has no behaviour-cloning term at all** beyond its finite warm-up. There is no
+knob. Also note `num_random 2` rather than the sota's 10: the penalty re-encodes `3 × num_random × batch`
+images per step, which costs 3.3 h / 5.3 h / 11.5 h per 100 k run at `num_random` 2 / 4 / 10.
 
-**Verdict: robustness does not explain the production-mode inversion.** The hypothesis was that IQL is the
-robust policy and BC the brittle over-fit one. The measurement says the opposite or nothing: BC is the most
-robust student in four of the six families (defocus, brightness, contrast, proprio noise), tied with IQL in
-the fifth (image noise, where both collapse and *TD3+BC* is the robust one), and statistically tied with
-IQL in the sixth (occlusion, where all three fail). On no condition in this sweep does IQL beat BC by more
-than the confidence interval — at its single best showing, occlusion 5% at 512 episodes, IQL leads BC by
-0.014 with z = 0.4. The clean control of this very sweep already reproduces the 1000-episode ranking
-(BC 0.973 > IQL 0.934 ≈ TD3+BC 0.930), so sensor degradation cannot be what flips the two in production.
-What the sweep *does* show is that the three objectives have genuinely different failure modes — TD3+BC's
-Q-gradient-shaped policy is nearly immune to pixel noise and the weakest under blur, occlusion and contrast
-loss, i.e. it leans on sharp local image structure that noise leaves intact and blur destroys, whereas the
-cloning-shaped policies lean on the smoothed appearance that noise destroys and blur preserves — and that
-the whole family is unusable with even 5% of each camera occluded, which is the one finding here with a
-direct deployment consequence. The production inversion has to be explained by something the perturbation
-sweep does not touch: the continuous demo is a *state*-distribution shift (repeated placements, homing
-between items, whatever pose the cell is left in after the previous object) rather than a sensor shift, and
-robustness to noise on the input is not robustness to being started somewhere the demonstrations never
-visited. That is the next thing to measure.
+## Implementation notes
 
-### CQL — parked, not part of the comparison
+**Transitions.** A shard stores one row per env step, time-major, and does not store next observations, so
+the successor of row `i` is row `i + successor_stride` (the collection's `num_envs`). `pickplace.offline`
+precomputes the legal pairs once per shard as an index tensor: *ongoing* rows pair with `i + stride`,
+*terminal* rows (terminated, not truncated) are kept with a masked bootstrap — dropping them would hide the
+success bonus, which is 150 of a ~182 mean episode return — and *truncated* rows are dropped, since their
+true next observation is not in the shard. No pair spans an episode boundary;
+`tests/unit/test_offline.py` pins the exact legal index set on a synthetic shard.
 
-**Parked deliberately, not abandoned because it was hard.** The code
-(`cql/{train.py,utils.py,config.yaml}`), its unit tests and its place in the simulator smoke test all stay,
-so it can be picked up again on a dataset with action diversity. What was found, for whoever does that:
-
-Three defects, two of them fixed:
-
-1. **The SAC entropy temperature diverges** (fixed). `CQLLoss` learns it against
-   `target_entropy = -action_dim`, but the shared actor's scale collapses while cloning
-   (`scale_lb 1e-4`; BC's settles at 0.024), so the policy's entropy sits below the target, the dual has no
-   attainable solution and it runs away — measured 0.73 → 1.22 → 3.98 → 8.77 → 9.60 between 14 k and 23 k
-   steps, after which the entropy term owns the actor loss and the policy goes to maximum entropy.
-   TorchRL's CQL sota sets `model.scale_lb: 0.1` for this reason, so `make_actor` grew a `scale_lb`
-   argument (default unchanged, BC/IQL untouched) and CQL passes 0.1. The temperature now decays.
-2. **The conservative penalty runs the critic away** (mitigated). Under the sota's Lagrange dual the critic
-   reached **Q ≈ -14,000** within 10 k steps; at a fixed `min_q_weight 5.0`, worse. At `min_q_weight 0.1`
-   with the dual off, `loss_cql` stays in `[-4, 1]`. That is what is committed.
-3. **Nested observation keys** (fixed, see above).
-
-Ruled out along the way: `deactivate_vmap=True` — CQL's pseudo-vmap over its 3×2 stacked Q-parameter sets
-was checked against real vmap on identical weights and agrees to five decimals.
-
-After all of that CQL is still at **0.000 success at every one of the nine evaluations of an 88 k-step
-run** (`students/cql_expert_proprio_s0`, stopped by SIGTERM once the answer was clear), having thrown away
-its 4 k-step cloning warm-up within a thousand steps of switching to the Q objective. The reason it has no
-rescue is structural: TD3+BC's actor loss is `-lambda*Q + MSE(pi(s), a)`, so `alpha` can switch the useless
-Q gradient off; **CQL's actor loss is `alpha*log pi - Q`, with no behaviour-cloning term at all** beyond the
-finite warm-up. There is no knob. CQL needs a dataset with action diversity, and tuning it further on this
-one would be tuning it towards BC.
-
-## Earlier single-seed runs: 150 k steps, seed 0
-
-These are the first runs in this folder and are **not** part of the four-algorithm grid above: a longer
-budget (150 k), a single seed, and two of them on image-only inputs. They are what established that
-proprioception, not the cameras, was the bottleneck, and they are kept for that.
-
-**Only deployable observations.** Every row below shares the protocol above (150 k steps, batch 256, eval
-every 10 k over 128 envs, seed 0, W&B group `offline_rl`) and uses only observations a real cell can
-measure: the two cameras, and `proprio` (`ee_pos`, `ee_quat`, `gripper_pos`, `joint_pos_rel`,
-`joint_vel_rel`, `last_action`), which always comes from the robot's own controller. Runs that consumed the
-simulator-only `privileged` group (food pose, orientation, grasp flag) were made early on and have been
-dropped: that information has no real-robot equivalent, so it cannot inform a decision about what to ship.
-Rows are grouped by the demonstration data they were trained on.
-
-Teacher (privileged state, cameras off, same evaluation protocol): **0.984** success.
-
-![Offline-RL students on deployable observations (image / image+proprio), by demonstration data](../../docs/experiments/offline_rl/success_rate_by_data.png)
-
-#### Deployable — image only; image + proprioception
-
-| Algorithm | Run | Inputs | Data | Best | Final | Mean of last 5 evals | Wall clock | W&B |
-|---|---|---|---|---|---|---|---|---|
-| BC | `students/bc_expert_medium_v1` | image | expert+medium | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | xy467x3h |
-| IQL | `students/iql_expert_medium_v1` | image | expert+medium | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | 597r6u3q |
-| BC | `students/bc_expert_only` | image | expert-only | 0.820 @ 130 k | 0.820 | 0.777 | 0.52 h | wj4kg3hy |
-| IQL | `students/iql_expert_only` | image | expert-only | 0.813 @ 90 k | 0.797 | 0.748 | 1.82 h | d2ia8nor |
-| BC | `students/bc_expert_only_proprio` | image+proprio | expert-only | **0.984 @ 100 k** | 0.953 | **0.955** | 0.58 h | 29ti5hv2 |
-| IQL | `students/iql_expert_only_proprio` | image+proprio | expert-only | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | eu7d42wg |
-
-Success rate per evaluation, 128 episodes each (binomial standard error around 0.6 is about 0.043 — the
-`±0.04` referenced throughout this file):
-
-| Gradient steps (k) | 10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100 | 110 | 120 | 130 | 140 | 150 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| BC, image, expert+medium | .05 | .44 | .45 | .57 | .43 | .58 | .65 | **.76** | .47 | .63 | .66 | .57 | .60 | .41 | .50 |
-| IQL, image, expert+medium | .16 | .34 | .30 | .63 | .45 | .44 | .59 | **.73** | .45 | .59 | .66 | .63 | .55 | .62 | .62 |
-| BC, image+proprio, expert-only | .86 | .95 | .93 | .95 | .93 | .98 | .97 | .85 | .95 | **.98** | .96 | .97 | .95 | .94 | .95 |
-| IQL, image+proprio, expert-only | .85 | .88 | .88 | .93 | .94 | .97 | **.98** | .97 | .95 | .98 | .98 | .97 | **.99** | .81 | .96 |
-
-**Reading the original two baselines (image only, expert+medium).** Both curves climb fast to ~0.45 by
-30-40 k and then oscillate in a 0.4-0.76 band with no further trend — flat from roughly 60 k on, so the
-150 k budget is already past the point of return. The swings are much larger than evaluation noise (±0.04),
-so they are real policy changes from step to step, not sampling error: with a state-independent scale that
-has collapsed (BC's mean scale falls from 0.98 to ~0.12 by 10 k steps), a small drift in the mean action
-changes the grasp outcome on a large share of episodes. The two algorithms are within noise of each other on
-the best checkpoint (0.76 vs 0.73), but IQL is the more stable of the two late in training (last-five mean
-0.61 vs 0.55, and BC's last three evaluations are its worst since 30 k). A camera-only student on this data
-tier reaches roughly **three quarters of the teacher's 0.984 at its best checkpoint and about 60% on
-average**, which is the cost of removing proprioception (and, in that ablation, privileged state too — see
-below for separating the two).
-
-**Reading the image+proprio runs.** Both land in a tight 0.81-0.99 band from 10 k on — far tighter than
-the image-only runs' 0.05-0.76 swing — and both cross the teacher's 0.984 at least once (BC at 100 k, IQL
-at 70 k, 110 k and 130 k). IQL's one bad point (0.805 @ 140 k) is a single-step dip, not a trend: its
-surrounding evaluations are 0.992 and 0.961. Proprioception does not just raise the ceiling, it removes most
-of the camera-only oscillation — plausible, since the student no longer has to infer joint/gripper state
-from the wrist camera before it can even attempt the grasp.
-
-**What to try next**, in the order the evidence suggests: pick checkpoints by evaluation rather than by step
-(the best checkpoint beats the final one by several points in most runs here); average several evaluations
-per point or use more evaluation envs so the selection is not chasing noise; add the `noisy_v3c` tier for
-state coverage; and give the actor a learned, state-dependent scale so it can stay stochastic where the data
-is ambiguous. The first two of those (checkpoint selection by evaluation, more evaluation envs) are still
-open; the four-algorithm grid above took the image+proprio inputs these runs identified as the group worth
-shipping.
-
-#### Borderline — not run, flagged for a future variant
-
-Nothing has been trained in this group yet. `belt` (the bowl's pose on the conveyor) is stored as
-simulator-only state in this dataset, but in a real cell it could plausibly come from a belt encoder or a
-fixed overhead camera rather than from privileged simulator state. `image + proprio + belt` would
-therefore be a legitimate deployable variant to try next — unlike `privileged` (food pose, orientation,
-grasp flag), which has no real-robot equivalent and is out of scope here.
-
-### Headline: how much of the gap to the teacher is closed, and by what
-
-The best **deployable** student, `iql_expert_only_proprio` (image+proprio, expert-only data), reaches
-**0.992 at its best checkpoint — slightly above the teacher's own 0.984** — and `bc_expert_only_proprio`
-reaches **0.984**, an exact match. On the more conservative final-checkpoint and last-5-mean metrics both
-land at 0.94-0.96, a few points under the teacher, which given the ±0.15 step-to-step swings this protocol
-already shows (see above) is noise, not a systematic shortfall.
-
-What closed the camera-only gap, data held fixed at expert-only (the best tier — see the data-quality
-ablation below): **image-only → image+proprio** takes BC's best checkpoint from 0.820 to 0.984, closing
-**100%** of its 0.164-point gap to the teacher, and IQL's from 0.813 to 0.992, closing its 0.171-point gap
-**and overshooting by 0.008**. Adding only what a real robot's own controller already knows — joint, gripper
-and end-effector state — is enough on its own to match the privileged-state teacher. Once the student can
-feel where its own joints and gripper are, the image only have to supply what they are good at: where the
-food and the bowl are. The teacher's 0.984 is not, in practice, out of reach for a policy that sees only what
-a real robot controller could give it.
-
-### Ablation: observation access
-
-One ablation on top of the image-only baselines above, same protocol (150 k steps, batch 256, eval every
-10 k over 128 envs, same seed): **observation access**, expert-only data with the inputs extended from
-image-only to image + `proprio`.
-
-#### Observation access: how much of the gap is the camera bottleneck?
-
-Same `expert_v3c` data as the expert-only baselines, but `network.in_keys` extended from image-only to
-`[[pixels,overview_rgb],[pixels,wrist_rgb],proprio]` via `pickplace.keys.expand_in_keys`. `proprio` is the
-robot's own state — joint positions and velocities, gripper opening, end-effector pose, last action — which
-any real controller publishes, so this stays deployable.
-
-| Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
-|---|---|---|---|---|---|---|
-| BC | `students/bc_expert_only_proprio` (image+proprio) | **0.984 @ 100 k** | 0.953 | 0.955 | 0.58 h | 29ti5hv2 |
-| IQL | `students/iql_expert_only_proprio` (image+proprio) | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | eu7d42wg |
-
-**Proprioception, not the images, was the bottleneck.** On the same expert-only data, adding the robot's own
-state takes BC from 0.820 to 0.984 and IQL from 0.813 to 0.992 — the whole gap to the teacher, and the curves
-also stop swinging (last-5 mean 0.955/0.942 versus 0.777/0.748). A camera-only policy has to infer its own
-arm and gripper configuration from pixels, mostly from the wrist view, and that inference is what it was
-failing at — not seeing the food or the bowl.
-
-Earlier runs that also consumed the simulator-only `privileged` group (food pose, orientation, grasp flag)
-reached 0.961 (BC) and 0.977 (IQL) — no better than these deployable runs — and have been dropped from the
-comparison, since no real deployment can have those inputs.
+**Tier mixing** is a fixed number of rows per shard per batch (largest-remainder split by
+`data.proportions`), concatenated. Not `ReplayBufferEnsemble`, because a shard's legal rows are a
+precomputed subset *and* the successor has to be gathered at `+stride`, which no stock sampler expresses.
 
 ## Adding an algorithm
 
-Create `pipeline/2_1_offline_rl/<algo>/{train.py,utils.py,config.yaml}`:
-
-* `config.yaml` — copy another algorithm's file and change only the block below `optim:` (the parity test
-  enforces the rest).
-* `utils.py` — `make_algo(cfg, obs_shapes, obs_keys, action_dim, device)` returning an object with
-  `.policy` (the module that is evaluated and checkpointed), `.update(batch) -> {name: scalar}` and
-  `.state_dict()`. Build the networks with `pickplace.offline.make_actor` (or
-  `make_deterministic_actor`, if the loss wants actions rather than a distribution) / `make_qvalue` /
-  `make_value` so the architecture stays identical. Every scalar `update` returns is averaged over
-  `log_interval` steps, so a term the algorithm only computes every *n*th step (TD3+BC's actor) has to be
-  re-reported on the steps in between or its logged mean is off by a factor of *n*.
-* `train.py` — copy another algorithm's; it only launches the Isaac app and hands `make_algo` to
-  `runner.train`.
-* Add the algorithm to the results table and to the smoke test's parametrization.
+Create `<algo>/{train.py,utils.py,config.yaml}` next to the existing ones. `utils.py` exposes
+`make_algo(cfg, obs_shapes, obs_keys, action_dim, device)` returning an object with `policy`, `update(batch)`
+and `state_dict()`; `train.py` loads `../runner.py` by path and calls `train(cfg, make_algo, "<algo>")`. Copy
+the shared block of a neighbouring `config.yaml` unchanged, or `tests/unit/test_offline_configs.py` fails.

@@ -180,10 +180,10 @@ p = 0.95 over 128 episodes), so **differences under about 0.04 are not differenc
 
 | Algorithm | Best | Final | Mean of last 5 | Steps to 0.90 | Late stability (sd) | Wall clock | Seed runs |
 |---|---|---|---|---|---|---|---|
-| **BC** | 0.979 ± 0.008 | 0.948 ± 0.031 | 0.944 ± 0.016 | **20 k ± 10 k** | 0.025 | **0.38 h** | [u1dw6agg](https://wandb.ai/sebastian-dittert/food_robot/runs/u1dw6agg) · [hcnamspj](https://wandb.ai/sebastian-dittert/food_robot/runs/hcnamspj) · [sst10l1f](https://wandb.ai/sebastian-dittert/food_robot/runs/sst10l1f) |
-| **IQL** | **0.990 ± 0.012** | **0.953 ± 0.008** | **0.956 ± 0.011** | 27 k ± 15 k | 0.025 | 1.22 h | [29pbjq2u](https://wandb.ai/sebastian-dittert/food_robot/runs/29pbjq2u) · [hb56w7uy](https://wandb.ai/sebastian-dittert/food_robot/runs/hb56w7uy) · [9uup6qxu](https://wandb.ai/sebastian-dittert/food_robot/runs/9uup6qxu) |
-| **TD3+BC** (`alpha 0.025`) | 0.958 ± 0.008 | 0.922 ± 0.027 | 0.919 ± 0.019 | 63 k ± 5 k | 0.036 | 0.83 h | [eclg2kb9](https://wandb.ai/sebastian-dittert/food_robot/runs/eclg2kb9) · [u6nau6bv](https://wandb.ai/sebastian-dittert/food_robot/runs/u6nau6bv) · [9bz3kwr5](https://wandb.ai/sebastian-dittert/food_robot/runs/9bz3kwr5) |
-| TD3+BC at the paper's `alpha 2.5` | 0.219 | 0.109 | 0.102 | never | 0.090 | 0.83 h | [gc76ywhn](https://wandb.ai/sebastian-dittert/food_robot/runs/gc76ywhn) (seed 0 only — see above) |
+| **BC** | 0.979 ± 0.008 | 0.948 ± 0.031 | 0.944 ± 0.016 | **20 k ± 10 k** | 0.025 | **0.38 h** | u1dw6agg · hcnamspj · sst10l1f |
+| **IQL** | **0.990 ± 0.012** | **0.953 ± 0.008** | **0.956 ± 0.011** | 27 k ± 15 k | 0.025 | 1.22 h | 29pbjq2u · hb56w7uy · 9uup6qxu |
+| **TD3+BC** (`alpha 0.025`) | 0.958 ± 0.008 | 0.922 ± 0.027 | 0.919 ± 0.019 | 63 k ± 5 k | 0.036 | 0.83 h | eclg2kb9 · u6nau6bv · 9bz3kwr5 |
+| TD3+BC at the paper's `alpha 2.5` | 0.219 | 0.109 | 0.102 | never | 0.090 | 0.83 h | gc76ywhn (seed 0 only — see above) |
 
 CQL is **not** in this comparison; it is parked, and the investigation is recorded at the end of this
 section.
@@ -444,12 +444,12 @@ Teacher (privileged state, cameras off, same evaluation protocol): **0.984** suc
 
 | Algorithm | Run | Inputs | Data | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|---|---|
-| BC | `students/bc_expert_medium_v1` | image | expert+medium | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
-| IQL | `students/iql_expert_medium_v1` | image | expert+medium | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
-| BC | `students/bc_expert_only` | image | expert-only | 0.820 @ 130 k | 0.820 | 0.777 | 0.52 h | [wj4kg3hy](https://wandb.ai/sebastian-dittert/food_robot/runs/wj4kg3hy) |
-| IQL | `students/iql_expert_only` | image | expert-only | 0.813 @ 90 k | 0.797 | 0.748 | 1.82 h | [d2ia8nor](https://wandb.ai/sebastian-dittert/food_robot/runs/d2ia8nor) |
-| BC | `students/bc_expert_only_proprio` | image+proprio | expert-only | **0.984 @ 100 k** | 0.953 | **0.955** | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
-| IQL | `students/iql_expert_only_proprio` | image+proprio | expert-only | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
+| BC | `students/bc_expert_medium_v1` | image | expert+medium | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | xy467x3h |
+| IQL | `students/iql_expert_medium_v1` | image | expert+medium | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | 597r6u3q |
+| BC | `students/bc_expert_only` | image | expert-only | 0.820 @ 130 k | 0.820 | 0.777 | 0.52 h | wj4kg3hy |
+| IQL | `students/iql_expert_only` | image | expert-only | 0.813 @ 90 k | 0.797 | 0.748 | 1.82 h | d2ia8nor |
+| BC | `students/bc_expert_only_proprio` | image+proprio | expert-only | **0.984 @ 100 k** | 0.953 | **0.955** | 0.58 h | 29ti5hv2 |
+| IQL | `students/iql_expert_only_proprio` | image+proprio | expert-only | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | eu7d42wg |
 
 Success rate per evaluation, 128 episodes each (binomial standard error around 0.6 is about 0.043 — the
 `±0.04` referenced throughout this file):
@@ -513,46 +513,11 @@ feel where its own joints and gripper are, the image only have to supply what th
 food and the bowl are. The teacher's 0.984 is not, in practice, out of reach for a policy that sees only what
 a real robot controller could give it.
 
-### Ablations: data quality and observation access
+### Ablation: observation access
 
-Two ablations on top of the two image-only baselines above, same protocol (150 k steps, batch 256, eval
-every 10 k over 128 envs, same seed): **data quality** — image-only inputs, `expert_v3c` alone (1 M frames)
-instead of expert+medium — and **observation access** — expert-only data, inputs extended from image-only
-to image + `proprio`.
-
-#### Data quality: does the medium tier help?
-
-| Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
-|---|---|---|---|---|---|---|
-| BC | `students/bc_expert_medium_v1` (expert+medium) | 0.758 @ 80 k | 0.500 | 0.548 | 0.64 h | [xy467x3h](https://wandb.ai/sebastian-dittert/food_robot/runs/xy467x3h) |
-| BC | `students/bc_expert_only` (expert-only) | **0.820 @ 130 k** | **0.820** | **0.777** | 0.52 h | [wj4kg3hy](https://wandb.ai/sebastian-dittert/food_robot/runs/wj4kg3hy) |
-| IQL | `students/iql_expert_medium_v1` (expert+medium) | 0.727 @ 80 k | 0.617 | 0.614 | 1.84 h | [597r6u3q](https://wandb.ai/sebastian-dittert/food_robot/runs/597r6u3q) |
-| IQL | `students/iql_expert_only` (expert-only) | **0.813 @ 90 k** | **0.797** | **0.748** | 1.82 h | [d2ia8nor](https://wandb.ai/sebastian-dittert/food_robot/runs/d2ia8nor) |
-
-**The medium tier hurts, for both algorithms.** Dropping it raises BC's best checkpoint by 6 points (0.758 →
-0.820) and, far more strikingly, its final-checkpoint stability: final success goes from 0.500 (BC's
-collapsed, worst-since-30k state at 150 k on the mixed data) to 0.820 — the same as its best. Last-five-eval
-mean rises from 0.548 to 0.777. IQL improves by a similar or larger margin on every metric: best +0.086
-(0.727 → 0.813), final +0.180 (0.617 → 0.797), last-five mean +0.134 (0.614 → 0.748).
-
-**IQL does not show the theoretically-expected benefit from mixed-quality data.** IQL's whole pitch —
-expectile value estimation plus advantage-weighted policy extraction — is supposed to let it exploit a mix of
-good and bad demonstrations better than plain cloning, tolerating (or even benefiting from) the lower-quality
-tier that BC just imitates blindly. That is not what happens here: on every metric IQL's improvement from
-removing `medium_v3c` is at least as large as BC's, in relative terms comparable (best: +12% vs +8%; final:
-+29% vs +64%, though BC's baseline final of 0.500 was an anomalous late-training collapse rather than a
-stable number, so that particular ratio overstates BC's gain). `medium_v3c` is a genuinely weaker *policy*, not noise: an
-earlier checkpoint of the same teacher run (`ppo_teacher_110100480`, 65% success, zero action noise). It is
-still the same training run, so it fails in the same ways the expert occasionally does rather than
-demonstrating different behaviour, and it gives both algorithms lower-return transitions to estimate
-advantages against. Whether IQL can exploit a *differently* suboptimal source (a beginner policy, or a
-scripted one) is untested here.
-
-**Read against the teacher.** Expert-only best checkpoints reach ~81-83% of the teacher's 0.984 (0.820/0.984,
-0.813/0.984) — noticeably closer than the expert+medium runs' ~75%. Since the *inputs* did not change (still
-image only), this gap between the two data tiers is entirely a data-quality effect, not an observation
-one; see below for how much of the *remaining* ~17-19 points is the camera-only bottleneck rather than the
-algorithm.
+One ablation on top of the image-only baselines above, same protocol (150 k steps, batch 256, eval every
+10 k over 128 envs, same seed): **observation access**, expert-only data with the inputs extended from
+image-only to image + `proprio`.
 
 #### Observation access: how much of the gap is the camera bottleneck?
 
@@ -563,8 +528,8 @@ any real controller publishes, so this stays deployable.
 
 | Algorithm | Run | Best | Final | Mean of last 5 evals | Wall clock | W&B |
 |---|---|---|---|---|---|---|
-| BC | `students/bc_expert_only_proprio` (image+proprio) | **0.984 @ 100 k** | 0.953 | 0.955 | 0.58 h | [29ti5hv2](https://wandb.ai/sebastian-dittert/food_robot/runs/29ti5hv2) |
-| IQL | `students/iql_expert_only_proprio` (image+proprio) | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | [eu7d42wg](https://wandb.ai/sebastian-dittert/food_robot/runs/eu7d42wg) |
+| BC | `students/bc_expert_only_proprio` (image+proprio) | **0.984 @ 100 k** | 0.953 | 0.955 | 0.58 h | 29ti5hv2 |
+| IQL | `students/iql_expert_only_proprio` (image+proprio) | **0.992 @ 130 k** | 0.961 | 0.942 | 1.83 h | eu7d42wg |
 
 **Proprioception, not the images, was the bottleneck.** On the same expert-only data, adding the robot's own
 state takes BC from 0.820 to 0.984 and IQL from 0.813 to 0.992 — the whole gap to the teacher, and the curves

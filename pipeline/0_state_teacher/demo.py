@@ -24,7 +24,9 @@ zone empty), ``dropped`` (the active food fell off the table or rode off the bel
 Usage:
     python pipeline/0_state_teacher/demo.py checkpoint=<path.pt>
     options: [seconds=120] [bowls=3] [spacing=<m>] [total_bowls=null] [home_between=true] [home_seconds=1.0]
-             [food_pool=<bowls+2>] [out=<mp4>] [image=128] [seed=0] [kind=teacher|student]
+             [food_pool=<bowls+2>] [out=<mp4>] [image=128] [seed=0] [kind=teacher|student] [video=true]
+``video=false`` writes only the JSON summary. For a teacher that also turns the cameras off, which is the
+difference between rendering three streams per step and running pure physics.
 Writes <out>.mp4, <out>.json (summary) and <out>_frame.png; prints ``DEMO_KIND``, ``DEMO {json}`` and ``DEMO_DONE``.
 """
 
@@ -51,6 +53,7 @@ HOME_SECONDS = float(cli.get("home_seconds", 1.0))
 FOOD_POOL = int(cli.get("food_pool", BOWLS + 2))
 IMAGE = int(cli.get("image", 128))
 SEED = int(cli.get("seed", 0))
+VIDEO = bool(cli.get("video", True))   # video=false: counts only, no rendering (much faster)
 OUT = Path(cli.get("out") or CHECKPOINT.with_name(f"{CHECKPOINT.stem}_demo{'_home' if HOME_BETWEEN else ''}.mp4"))
 TAIL_SECONDS = 1.0  # video kept running after the last bowl of a finite (total_bowls) run was resolved
 
@@ -397,7 +400,9 @@ print(f"DEMO_KIND kind={POLICY_KIND} source={'cli' if cli.get('kind') else 'auto
 demo_cfg = {"bowls": BOWLS, "food_pool": FOOD_POOL, "spacing": SPACING}
 if POLICY_KIND == "teacher":
     NATIVE_HW = (IMAGE, IMAGE)  # the teacher never consumes the pixels obs; image= truly drives capture
-    env_cfg = {**config["env"], "num_envs": 1, "cameras": True, "render_camera": True, "seed": SEED,
+    # A teacher reads state only, so with video off nothing needs a camera: turning them off here is the
+    # difference between rendering three camera streams per step and running pure physics.
+    env_cfg = {**config["env"], "num_envs": 1, "cameras": VIDEO, "render_camera": VIDEO, "seed": SEED,
                "render_image_size": list(SCENE_HW), "image_size": [IMAGE, IMAGE], "demo": demo_cfg}
     env = make_env(env_cfg)
     actor = tu.load_teacher_actor(CHECKPOINT, env, env.device)
@@ -438,7 +443,20 @@ episode_ends = robot_resets = 0
 n = tail = 0
 last_length = int(u.episode_length_buf[0])
 
-with imageio.get_writer(OUT, fps=round(1.0 / dt), codec="libx264", quality=8, macro_block_size=1) as writer, \
+class _NoWriter:
+    def append_data(self, frame):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+_writer_ctx = (imageio.get_writer(OUT, fps=round(1.0 / dt), codec="libx264", quality=8, macro_block_size=1)
+               if VIDEO else _NoWriter())
+with _writer_ctx as writer, \
         torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
     while n < max_steps:
         ready = line.rewrite_obs(td)
@@ -472,17 +490,18 @@ with imageio.get_writer(OUT, fps=round(1.0 / dt), codec="libx264", quality=8, ma
             f"bowls {s['bowls_seen']}   " + ("policy" if not homing.active else "homing" if homing.moving else
                                              "waiting for a bowl"),
         ]
-        frame = compose(u.scene["render_cam"].data.output["rgb"][0], td["pixels", "overview_rgb"][0],
-                        td["pixels", "wrist_rgb"][0], caption, lines)
-        writer.append_data(frame)
-        if n == still_step:
-            imageio.imwrite(still, frame)
+        if VIDEO:
+            frame = compose(u.scene["render_cam"].data.output["rgb"][0], td["pixels", "overview_rgb"][0],
+                            td["pixels", "wrist_rgb"][0], caption, lines)
+            writer.append_data(frame)
+            if n == still_step:
+                imageio.imwrite(still, frame)
         if line.finished():
             tail += 1
             if tail >= round(TAIL_SECONDS / dt):
                 break
 
-if not still.exists():  # the run ended before the chosen still
+if VIDEO and not still.exists():  # the run ended before the chosen still
     imageio.imwrite(still, frame)
 summary = {
     **line.tally.summary(n * dt),

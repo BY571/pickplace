@@ -1,0 +1,23 @@
+\documentclass[border=12pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{ragged2e}
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash\hyphenpenalty=10000\exhyphenpenalty=10000}p{#1}}
+\newcommand{\headrule}{\noalign{\global\arrayrulewidth=1.2pt}\hline\noalign{\global\arrayrulewidth=0.4pt}}
+\begin{document}
+\begin{tabular}{|l|l|r|r|r|r|L{5.2cm}|}
+\hline
+\textbf{Tier} & \textbf{Checkpoint} & \textbf{Policy} & \textbf{Episodes} & \textbf{Length} & \textbf{Success}
+  & \textbf{How it fails} \\
+\headrule
+expert   & final (176\,M)        & 98.4\,\% & 8{,}515 & 114 & 98.3\,\% & rarely; 1\,\% of items dropped off the table \\ \hline
+medium   & 110\,M frames         & 65.2\,\% & 5{,}818 & 164 & 67.4\,\% & misses the bowl: 32\,\% of episodes let it leave the zone \\ \hline
+beginner & 100\,M frames         & 21.9\,\% & 4{,}086 & 231 & 25.5\,\% & reaches the zone but rarely releases in time: 73\,\% \\
+\headrule
+\multicolumn{7}{|l|}{Each tier: 1{,}007{,}616 frames, two 84$\times$84 RGB cameras plus proprioception,
+  actions and the full reward vector, 40\,GB} \\
+\hline
+\end{tabular}
+\end{document}

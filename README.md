@@ -56,7 +56,7 @@ command there inside the container; `SPARK_HOST` and `SPARK_DIR` point it anywhe
     python pipeline/1_collect_data/collect.py checkpoint=<teacher.pt> frames=1_000_000  # dataset, ~6 min
     python pipeline/2_1_offline_rl/bc/train.py                                          # student, ~25 min
 
-Swap `bc` for `iql`, `cql` or `td3_bc`. Long runs are best started detached, and stopped with SIGTERM so a
+Swap `bc` for `iql` or `td3_bc`. Long runs are best started detached, and stopped with SIGTERM so a
 final checkpoint and evaluation are still written:
 
     DOCKER_DETACH=1 DOCKER_NAME=teacher ./docker/run.sh python pipeline/0_state_teacher/train.py

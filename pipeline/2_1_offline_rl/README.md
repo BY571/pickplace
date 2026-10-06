@@ -1,10 +1,8 @@
 # Stage 2.1 · offline RL from the camera shards
 
 Train a **deployable student** on the shards recorded in stage 1, with no simulator in the loop except for
-evaluation. Four algorithms share one runner, one set of networks, one data mix and one evaluation
-protocol, so the only thing that differs between rows of the results table is the objective: **BC**, **IQL**
-and **TD3+BC** are compared below, **CQL is parked** (it does not learn on zero-action-noise data, see the
-end of this file).
+evaluation. **BC**, **IQL** and **TD3+BC** share one runner, one set of networks, one data mix and one
+evaluation protocol, so the only thing that differs between rows of the results table is the objective.
 
 ## Protocol
 
@@ -25,7 +23,7 @@ ceiling, so **differences under about 0.04 are not differences**.
 
 ## Run
 
-    python pipeline/2_1_offline_rl/bc/train.py        # also: iql, td3_bc, cql
+    python pipeline/2_1_offline_rl/bc/train.py        # also: iql, td3_bc
     docker exec <container> pkill -TERM -f "kit/python/bin/python3.*train.py"   # stop, keeping a final checkpoint
 
 One run at a time: each holds a 128-env camera evaluation env, and two Isaac jobs at once have OOM-killed
@@ -65,9 +63,8 @@ value-based method to add. `expert_v3c` was recorded from a deterministic teache
 with exactly one action and `Q(s, ·)` has no counterfactual to fit: on a trained critic Q varies by ±40
 across states and about **2** across actions. The algorithms then sort by how much they let that
 action-blind Q move the policy — BC not at all, IQL only as a re-weighting of a cloning term, TD3+BC
-through an explicit Q gradient that has to be turned down 100×, CQL through a Q gradient it has nothing to
-trade against. The open question is a dataset one, not an algorithm one: whether action-noisy data lets
-these methods beat cloning instead of matching it.
+through an explicit Q gradient that has to be turned down 100×. The open question is a dataset one, not an
+algorithm one: whether action-noisy data lets these methods beat cloning instead of matching it.
 
 ### Does the student beat its teacher?
 
@@ -164,22 +161,6 @@ TD3+BC also cannot use the shared stochastic actor — `TD3BCLoss` reads `action
 the smoothing noise itself — so it gets `make_deterministic_actor`. `tests/unit/test_offline.py` pins that,
 because the wrong actor would train and checkpoint without error while making policy extraction
 meaningless.
-
-### CQL — parked
-
-**Parked deliberately, not abandoned because it was hard.** The code, its unit tests and its place in the
-simulator smoke test all stay, so it can be picked up on a dataset with action diversity. Three defects
-were found, two fixed: the SAC entropy temperature diverges when the actor's scale collapses while cloning
-(fixed with `scale_lb 0.1`, as TorchRL's own CQL sota does), the conservative penalty runs the critic to
-Q ≈ −14,000 under the Lagrange dual (mitigated with `min_q_weight 0.1`, dual off), and `CQLLoss` silently
-drops nested observation keys when it repeats the observation per sampled action (worked around in
-`cql/utils.py` by aliasing them onto flat names).
-
-After all of that CQL is still at **0.000 success at every evaluation of an 88 k-step run**. The reason is
-structural: TD3+BC's actor loss is `-lambda*Q + MSE(pi(s), a)`, so `alpha` can switch a useless Q gradient
-off, while **CQL's actor loss has no behaviour-cloning term at all** beyond its finite warm-up. There is no
-knob. Also note `num_random 2` rather than the sota's 10: the penalty re-encodes `3 × num_random × batch`
-images per step, which costs 3.3 h / 5.3 h / 11.5 h per 100 k run at `num_random` 2 / 4 / 10.
 
 ## Implementation notes
 

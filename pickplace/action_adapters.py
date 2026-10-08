@@ -116,6 +116,15 @@ def make_joint_action_adapter(mode: str):
                 self._scale = float(env.cfg.arm.joint_action_scale)
             return env, robot
 
+        def _joint_limits(self):
+            """The arm's soft joint range, or None before the transform is attached to an env."""
+            try:
+                _, robot = self._robot()
+            except (AttributeError, KeyError, TypeError):
+                return None
+            lim = robot.data.soft_joint_pos_limits.torch[0, self._ids, :]
+            return lim[..., 0], lim[..., 1]
+
         def _mark_stale(self, rows: torch.Tensor) -> None:
             self._reseed = rows if self._reseed is None else (self._reseed | rows)
 
@@ -144,12 +153,14 @@ def make_joint_action_adapter(mode: str):
             return tensordict
 
         def _step(self, tensordict, next_tensordict):
-            # Under native auto-reset a done row is teleported inside step(), so its integrated target is
-            # stale. `done` here is the simulator's own: StepCounter runs with max_steps=None and cannot
-            # add one. Were that to change, re-derive this from the termination manager the way
-            # EpisodeOutcome does, or rows that were never physically reset would be re-seeded.
-            done = next_tensordict.get("done")
-            self._mark_stale(done.reshape(done.shape[0], -1).any(-1))
+            # Under native auto-reset a row whose episode ended is teleported inside step(), so its
+            # integrated target is stale. This asks the termination manager rather than reading `done` off
+            # the tensordict: transforms above this one in the Compose can *add* a done (StepCounter with
+            # max_steps set), and such a row is not physically reset, so re-seeding it would be wrong.
+            from pickplace.torchrl_env import _unwrapped
+
+            dones = _unwrapped(self.parent).termination_manager.dones
+            self._mark_stale(dones.reshape(dones.shape[0], -1).any(-1))
             return next_tensordict
 
         def _reset(self, tensordict, tensordict_reset):
@@ -167,9 +178,10 @@ def make_joint_action_adapter(mode: str):
             """Advertise the adapted space.
 
             ``joint_velocity`` is unbounded throughout: the env declares no joint-velocity limits, and a
-            spec cannot bound the gripper dimension alone. ``joint_position`` bounds the arm to ±π — a sane
-            sampling range, not the robot's own limits, which ``_inv_call`` clamps to — and the gripper to
-            [0, 1]. The gripper is thresholded either way, so an out-of-range value cannot misbehave.
+            spec cannot bound the gripper dimension alone. ``joint_position`` advertises the robot's own
+            soft joint limits, so a policy does not spend distribution density on angles ``_inv_call``
+            would only clamp away; ±π stands in when the robot cannot be read (no parent yet). The gripper
+            is [0, 1] and thresholded either way, so an out-of-range value cannot misbehave.
             """
             spec = input_spec["full_action_spec", "action"]
             if self.mode == "joint_velocity":
@@ -177,6 +189,9 @@ def make_joint_action_adapter(mode: str):
             else:
                 low = torch.full(spec.shape, -torch.pi, device=spec.device)
                 high = torch.full(spec.shape, torch.pi, device=spec.device)
+                joint_limits = self._joint_limits()
+                if joint_limits is not None:
+                    low[..., :-1], high[..., :-1] = joint_limits
                 low[..., -1], high[..., -1] = 0.0, 1.0
                 adapted = Bounded(low=low, high=high, shape=spec.shape, dtype=spec.dtype, device=spec.device)
             # assign the leaf rather than rebuilding the composite, which would drop any sibling key

@@ -135,6 +135,60 @@ The TorchRL action spec is unbounded (Isaac Lab declares no action limits), but 
 [-1, 1]; the action terms multiply them by the arm's action scale. Squash policy outputs accordingly (the PPO
 example uses a `TanhNormal` on [-1, 1]).
 
+### Action adapters
+
+`env.action_adapter` layers a different action parameterization on top of `joint_pos` without touching the
+simulation, so a policy that speaks another language can be run on exactly the environment every other
+result in this repository was measured on. `pickplace/action_adapters.py` converts at the boundary, as the
+last transform in `make_env`.
+
+| `action_adapter` | Arm action | Gripper | Needs |
+|---|---|---|---|
+| `native` (default) | whatever `action_mode` says | as above | — |
+| `joint_velocity` | 7 joint velocities [rad/s], integrated one control period into a target | fraction in [0, 1], thresholded | `action_mode=joint_pos` |
+| `joint_position` | 7 absolute joint angles [rad] | fraction in [0, 1], thresholded | `action_mode=joint_pos` |
+
+The conversion is exact rather than fitted: `joint_pos` applies `target = default + scale · action`, so
+commanding a target is `action = (target − default) / scale`, and targets are clamped into the robot's soft
+joint limits before inverting. `tests/unit/test_action_adapters.py` pins the algebra and
+`tests/isaac/test_action_adapter.py` checks it against the moving robot.
+
+Two details are load-bearing, and both were found by that simulator test rather than by reasoning:
+
+* **The velocity integral runs on the commanded target, not on the measured joints.** Anchoring it to the
+  measurement lets a sagging arm drag its own target downward: a *zero* command drifted 0.26 rad in 0.2 s.
+  A real velocity-controlled arm holds station because its controller fights gravity, so the emulation has
+  to hold the target itself. The target re-seeds from the measurement when an episode ends.
+* **An adapter switches the arm to its high-PD asset** (`FoodCellEnvCfg.stiff_arm`, set automatically).
+  `joint_pos` otherwise runs the plain Franka gains, which droop 0.23 rad under gravity — fine for a policy
+  that learned to compensate, useless for one commanding joint targets. With the stiff asset a zero command
+  holds to 0.0000 rad over 50 steps and an absolute target is reached to 0.002 rad.
+
+Expect a tracking transient on velocities: a commanded rate realizes about 60% of its displacement over the
+first 0.4 s before the controller catches up. That is the arm, not the conversion.
+
+**Why this is worth having.** The action space is a design choice with real consequences, and these three
+let the same task be measured under each:
+
+* **Velocities are state-relative, and their no-op is well defined.** Zero means stop, wherever the arm is,
+  which is why teleoperation stacks and the VLAs trained on them (DROID, π0.5) use them. No IK runs at
+  inference, so there is no solver to fail near a singularity and no extra latency. The cost is drift:
+  position is only ever the integral of commands, so biases accumulate, and the realized motion is `v · dt`,
+  which makes the result sensitive to loop timing. Precision at the end of a reach is the hard part, since
+  the policy has to drive the velocity to zero exactly as the gripper arrives.
+* **Absolute joint targets never drift** and a dropped command means "stay", but they encode a pose rather
+  than a motion: the same action means different things from different starts, so a policy has to learn the
+  workspace rather than a local correction.
+* **End-effector deltas** (`ee_delta_pose`, what this repository's policies use) are state-relative like
+  velocities and kinematics-agnostic, so they port across arms, and they shrink naturally as the target is
+  approached. In exchange the IK solver sits in the loop: it costs latency, it can fail, and the motion a
+  given delta produces depends on the arm's configuration and the solver's damping, so actions are only
+  comparable across setups that share the same controller.
+
+The open empirical question this makes cheap to answer: relabel one set of demonstrations into each space,
+train the same student on each, and see which loses the least. Same data, same network, same evaluation,
+action space the only variable.
+
 ## Rewards
 
 Isaac Lab multiplies each term by the step duration; one-shot terms are compensated so the episode return

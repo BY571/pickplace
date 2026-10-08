@@ -225,6 +225,9 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     food: FoodSourceCfg = RigidFoodCfg()
     belt: BeltCfg = BeltCfg()
     action_mode: ActionMode = "ee_delta_pose"
+    stiff_arm: bool = False
+    """Use the arm's high-PD asset in ``joint_pos`` mode, so commanded joint targets are tracked rather
+    than drooping. Set automatically when an action adapter converts into joint targets."""
     cameras: bool = True
     image_size: tuple[int, int] = (128, 128)
     frame_stack: int = 1
@@ -386,7 +389,11 @@ class FoodCellEnvCfg(ManagerBasedRLEnvCfg):
     # ------------------------------------------------------------------
     def _build_scene(self, zone) -> None:
         arm, belt, s = self.arm, self.belt, self.scene
-        robot = arm.ik_robot if self.action_mode == "ee_delta_pose" else arm.robot
+        # The high-PD asset is Isaac Lab's variant for *position-target* control. ee_delta_pose needs it for
+        # the IK targets; joint_pos only needs it when something commands joint targets precisely, which is
+        # what stiff_arm says. Left off by default, the plain gains droop ~0.23 rad under gravity.
+        stiff = self.action_mode == "ee_delta_pose" or self.stiff_arm
+        robot = arm.ik_robot if stiff else arm.robot
         s.robot = robot.replace(prim_path="{ENV_REGEX_NS}/Robot")
         s.ee_frame = FrameTransformerCfg(
             prim_path=f"{{ENV_REGEX_NS}}/Robot/{arm.base_link_name}",

@@ -12,6 +12,12 @@ def _env_applies(action: torch.Tensor, scale: float = SCALE) -> torch.Tensor:
     return DEFAULT + scale * action
 
 
+def _velocity_to_native(q_dot, q, q_default=DEFAULT, scale=SCALE, dt=0.02, limits=None):
+    """One step of the transform's own path, seeded from the measurement (the just-reset case)."""
+    target = A.integrate_velocity(q_dot, None, q, dt, limits)
+    return A.joint_target_to_native(target, q_default, scale, limits)
+
+
 def test_absolute_targets_invert_the_envs_own_mapping_exactly():
     target = DEFAULT + torch.tensor([[0.1, -0.2, 0.3, 0.05, -0.4, 0.15, 0.25]])
     native = A.joint_target_to_native(target, DEFAULT, SCALE)
@@ -34,7 +40,7 @@ def test_velocity_integrates_exactly_one_control_period():
     q = DEFAULT + 0.3
     q_dot = torch.tensor([[0.5, -0.25, 0.0, 1.0, -1.0, 0.1, 0.2]])
     dt = 0.02
-    native = A.joint_velocity_to_native(q_dot, q, DEFAULT, SCALE, dt)
+    native = _velocity_to_native(q_dot, q, dt=dt)
     assert torch.allclose(_env_applies(native), q + q_dot * dt, atol=1e-6)
 
 
@@ -42,7 +48,7 @@ def test_zero_velocity_holds_the_current_pose_wherever_it_is():
     # the property that makes velocity a safe default: the no-op does not depend on the default pose
     for offset in (-0.4, 0.0, 0.9):
         q = DEFAULT + offset
-        native = A.joint_velocity_to_native(torch.zeros_like(q), q, DEFAULT, SCALE, 0.02)
+        native = _velocity_to_native(torch.zeros_like(q), q)
         assert torch.allclose(_env_applies(native), q, atol=1e-6)
 
 
@@ -65,12 +71,34 @@ def test_gripper_threshold_is_configurable():
     assert A.gripper_fraction_to_binary(f, closed_at=0.2).item() == -1.0
 
 
-def test_velocity_and_position_adapters_agree_on_the_same_target():
+def test_the_integrator_seeded_from_the_measurement_matches_the_one_shot_algebra():
     q, dt = DEFAULT + 0.2, 0.02
     q_dot = torch.tensor([[0.3, 0.0, -0.3, 0.1, 0.0, 0.2, -0.1]])
-    from_velocity = A.joint_velocity_to_native(q_dot, q, DEFAULT, SCALE, dt)
+    from_velocity = _velocity_to_native(q_dot, q, dt=dt)
     from_position = A.joint_target_to_native(q + q_dot * dt, DEFAULT, SCALE)
     assert torch.allclose(from_velocity, from_position, atol=1e-7)
+
+
+def test_a_held_target_ignores_a_sagging_measurement():
+    """The regression test for the 0.26 rad drift: a zero command must not follow the arm down.
+
+    Anchoring the integral to the measurement made the target chase a sagging arm. Here the measurement
+    droops 0.01 rad every step while the command stays zero; the carried target must not move at all.
+    """
+    target = DEFAULT.clone()
+    measured = DEFAULT.clone()
+    for _ in range(20):
+        measured = measured - 0.01
+        target = A.integrate_velocity(torch.zeros_like(target), target, measured, dt=0.02)
+    assert torch.allclose(target, DEFAULT, atol=1e-7), "the commanded target followed the sag"
+
+
+def test_a_stale_row_is_reseeded_from_the_measurement():
+    """What the transform does for a row whose episode ended: pass q_target=None for that row."""
+    carried = DEFAULT + 0.5
+    measured = DEFAULT - 0.2
+    assert torch.allclose(A.integrate_velocity(torch.zeros_like(carried), None, measured, 0.02), measured)
+    assert torch.allclose(A.integrate_velocity(torch.zeros_like(carried), carried, measured, 0.02), carried)
 
 
 def test_unknown_adapter_is_rejected_by_name():
@@ -78,15 +106,36 @@ def test_unknown_adapter_is_rejected_by_name():
         A.make_joint_action_adapter("joint_velocities")  # plural: a plausible typo
 
 
-def test_every_adapter_is_described_and_named():
-    assert A.ADAPTERS[0] == "native"
-    for mode in A.ADAPTERS:
-        assert A.describe(mode)
-    joints = [f"panda_joint{i}" for i in range(1, 8)]
-    assert A.adapted_action_names(joints, "native") == []
-    for mode, unit in (("joint_velocity", "qd"), ("joint_position", "q")):
-        names = A.adapted_action_names(joints, mode)
-        assert len(names) == 8 and names[0] == f"{unit}[panda_joint1]" and names[-1] == "gripper"
+def test_native_is_not_a_transform_to_build():
+    # "native" means no adapter at all; building one silently produced a *position* adapter before
+    with pytest.raises(ValueError, match="native"):
+        A.make_joint_action_adapter("native")
+
+
+@pytest.mark.parametrize("mode", A.JOINT_ADAPTERS)
+def test_each_adapter_builds_and_knows_its_mode(mode):
+    assert A.make_joint_action_adapter(mode).mode == mode
+
+
+@pytest.mark.parametrize(("mode", "bounded"), [("joint_position", True), ("joint_velocity", False)])
+def test_the_advertised_action_spec_matches_the_documented_units(mode, bounded):
+    from torchrl.data import Composite, Unbounded
+
+    adapter = A.make_joint_action_adapter(mode)
+    spec = Composite(
+        full_action_spec=Composite(action=Unbounded(shape=(2, 8)), shape=(2,)),
+        other_key=Unbounded(shape=(2, 3)),  # a sibling the adapter must not drop
+        shape=(2,),
+    )
+    out = adapter.transform_input_spec(spec)
+    action = out["full_action_spec", "action"]
+    assert "other_key" in out.keys(), "rebuilding the composite would drop siblings"
+    if bounded:
+        assert action.space.low[0, -1] == 0.0 and action.space.high[0, -1] == 1.0  # gripper fraction
+        assert action.space.low[0, 0] < -3.1 and action.space.high[0, 0] > 3.1     # joints, about +-pi
+    else:
+        # TorchRL spells "unbounded" as the dtype's finite extremes rather than inf
+        assert action.space.low.max() < -1e30 and action.space.high.min() > 1e30
 
 
 def test_the_default_env_keeps_todays_action_space():
@@ -101,7 +150,7 @@ def test_a_full_arm_sweep_stays_inside_the_limits_it_was_given():
     q = DEFAULT.clone()
     q_dot = torch.full_like(q, 10.0)  # far faster than any joint can move
     for _ in range(50):
-        native = A.joint_velocity_to_native(q_dot, q, DEFAULT, SCALE, 0.02, (low, high))
+        native = _velocity_to_native(q_dot, q, limits=(low, high))
         q = _env_applies(native)
         assert torch.all(q <= high + 1e-6) and torch.all(q >= low - 1e-6)
     assert torch.allclose(q, high, atol=1e-6)

@@ -151,31 +151,26 @@ def make_env(env_cfg: Mapping):
 
     cfg = build_cell_env_cfg(env_cfg)
     adapter = env_cfg.get("action_adapter", DEFAULT_ENV["action_adapter"])
-    if adapter != "native" and cfg.action_mode != "joint_pos":
-        raise ValueError(
-            f"action_adapter={adapter!r} converts into the env's joint_pos action; set action_mode='joint_pos' "
-            f"(got {cfg.action_mode!r})."
-        )
     task = env_cfg.get("task", DEFAULT_ENV["task"])
     device = torch.device(env_cfg.get("device", DEFAULT_ENV["device"]))
     weights = torch.tensor(weight_vector(reward_weights(env_cfg)), device=device)
     base = IsaacLabWrapper(gym.make(task, cfg=cfg), native_autoreset=True, device=device)
-    return TransformedEnv(
-        base,
-        Compose(
-            # StepCounter first: it is the transform that can *add* a done (max_steps truncation), and the
-            # two transforms below read `done` to decide which rows ended an episode.
-            StepCounter(),
-            _make_episode_outcome(OUTCOME_TERMS),
-            _make_reward_terms_vector(),
-            LineariseRewards(in_keys=["reward_terms"], out_keys=["reward"], weights=weights),
-            RewardSum(in_keys=["reward"], out_keys=["episode_reward"]),
-            RewardSum(in_keys=["reward_terms"], out_keys=["episode_reward_terms"]),
-            # last, so it sees the action a policy sampled in the adapted space and hands the env its native
-            # one; every transform above it reads observations and rewards, which the adapter never touches
-            *( [make_joint_action_adapter(adapter)] if adapter != "native" else [] ),
-        ),
-    )
+    transforms = [
+        # StepCounter first: it is the transform that can *add* a done (max_steps truncation), and the
+        # two transforms below read `done` to decide which rows ended an episode.
+        StepCounter(),
+        _make_episode_outcome(OUTCOME_TERMS),
+        _make_reward_terms_vector(),
+        LineariseRewards(in_keys=["reward_terms"], out_keys=["reward"], weights=weights),
+        RewardSum(in_keys=["reward"], out_keys=["episode_reward"]),
+        RewardSum(in_keys=["reward_terms"], out_keys=["episode_reward_terms"]),
+    ]
+    if adapter != "native":
+        # Last: Compose runs _inv_call in reverse, so the adapter is the first to see the action a policy
+        # sampled in the adapted space and the last thing before the env gets its native one. Everything
+        # above reads observations and rewards, which the adapter never touches.
+        transforms.append(make_joint_action_adapter(adapter))
+    return TransformedEnv(base, Compose(*transforms))
 
 
 def _log_stats(env, prefix: str) -> dict[str, float]:

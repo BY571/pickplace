@@ -7,10 +7,10 @@ The environment speaks two action languages natively (``pickplace.envs.cell_env_
 joint positions** (what many motion-planning stacks emit).
 
 Rather than add action modes to the environment — which would change the thing every existing result was
-measured on — this module converts at the boundary. ``JointActionAdapter`` is a TorchRL transform: it
-rewrites the action spec, so an algorithm samples in the new space, and converts each action into the
-env's native one on its way through. The physics, the reward and the observations are untouched, so a run
-in a converted action space is comparable to every other run in this repository.
+measured on — this module converts at the boundary. ``make_joint_action_adapter`` builds a TorchRL
+transform: it rewrites the action spec, so an algorithm samples in the new space, and converts each action
+into the env's native one on its way through. The physics, the reward and the observations are untouched,
+so a run in a converted action space is comparable to every other run in this repository.
 
 Which space a policy speaks is a real design choice with consequences, see ``docs/environment.md``:
 velocities are state-relative and need no IK, but integrate drift and are timing-sensitive; absolute joint
@@ -20,12 +20,13 @@ from different starts.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import torch
 
 ADAPTERS = ("native", "joint_velocity", "joint_position")
 """``native`` leaves the env's own action space alone; the others are defined in this module."""
+
+JOINT_ADAPTERS = ADAPTERS[1:]
+"""The adapters this module implements. ``native`` is the absence of one, not a mode to build."""
 
 
 def joint_target_to_native(
@@ -45,41 +46,27 @@ def joint_target_to_native(
 
 def integrate_velocity(
     q_dot: torch.Tensor, q_target: torch.Tensor | None, q_measured: torch.Tensor, dt: float,
-    band: float | None = None, limits: tuple[torch.Tensor, torch.Tensor] | None = None,
+    limits: tuple[torch.Tensor, torch.Tensor] | None = None,
 ) -> torch.Tensor:
     """Advance the commanded joint target by one control period of ``q_dot`` [rad/s].
 
     The integral runs on the *commanded target*, not on the measured position, and this is the whole
     subtlety. A real velocity-controlled arm holds station on a zero command because its own controller
-    fights gravity. Ours is position-controlled with the plain (not high-PD) Franka gains, so re-anchoring
-    the target to the measured joints every step would let a sagging arm drag its own target down: measured
-    drift of 0.26 rad in 10 steps on a zero command, before this was fixed.
+    fights gravity. Ours is position-controlled, so re-anchoring the target to the measured joints every
+    step would let a sagging arm drag its own target down: measured drift of 0.26 rad in 0.2 s on a zero
+    command, before this was fixed.
 
-    ``band`` is an optional anti-windup for a blocked arm: the target is pulled back to within ``band``
-    radians of the measurement before integrating. It defaults to off, because against a *continuously*
-    sagging arm a band re-creates the very chasing it was meant to prevent -- the target simply follows the
-    sag one band behind. Resets are handled by the caller re-seeding instead (``q_target=None``).
+    A band-limited anti-windup for a blocked arm (pull the target back to within N radians of the
+    measurement before integrating) was tried and rejected: against a *continuously* sagging arm it
+    re-creates the very chasing it was meant to prevent, the target simply following the sag one band
+    behind. Staleness is handled by re-seeding instead: ``q_target=None`` starts from the measurement.
     """
     if q_target is None:
         q_target = q_measured
-    elif band is not None:
-        q_target = torch.clamp(q_target, q_measured - band, q_measured + band)
     q_target = q_target + q_dot * dt
     if limits is not None:
         q_target = torch.clamp(q_target, limits[0], limits[1])
     return q_target
-
-
-def joint_velocity_to_native(
-    q_dot: torch.Tensor, q_current: torch.Tensor, q_default: torch.Tensor, scale: float, dt: float,
-    limits: tuple[torch.Tensor, torch.Tensor] | None = None,
-) -> torch.Tensor:
-    """One-shot velocity conversion, anchored to the measurement: ``q_target = q_current + q_dot * dt``.
-
-    Kept for the stateless case (and for the unit tests that pin the algebra). The transform uses
-    ``integrate_velocity`` instead, which holds its own target across steps; see that docstring for why.
-    """
-    return joint_target_to_native(q_current + q_dot * dt, q_default, scale, limits)
 
 
 def gripper_fraction_to_binary(fraction: torch.Tensor, closed_at: float = 0.5, closed_is_high: bool = True
@@ -95,78 +82,96 @@ def gripper_fraction_to_binary(fraction: torch.Tensor, closed_at: float = 0.5, c
     return torch.where(closed, -torch.ones_like(fraction), torch.ones_like(fraction))
 
 
-def make_joint_action_adapter(mode: str, *, gripper_closed_at: float = 0.5, gripper_closed_is_high: bool = True,
-                              clamp_to_limits: bool = True, velocity_band: float | None = None):
-    """Build the TorchRL transform for ``mode`` (imports TorchRL lazily, as the rest of this package does)."""
-    from torchrl.data import Bounded, Composite, Unbounded
+def make_joint_action_adapter(mode: str):
+    """Build the transform for ``mode`` (TorchRL is imported lazily, as elsewhere in this package)."""
+    if mode not in JOINT_ADAPTERS:
+        raise ValueError(f"Unknown action adapter {mode!r}. Available: {list(JOINT_ADAPTERS)}")
+
+    from torchrl.data import Bounded, Unbounded
     from torchrl.envs import Transform
 
-    if mode not in ADAPTERS:
-        raise ValueError(f"Unknown action adapter {mode!r}. Available: {list(ADAPTERS)}")
-
     class JointActionAdapter(Transform):
-        """Converts a joint-space action into the env's ``joint_pos`` action on its way to the simulator."""
+        """Converts a joint-space action into the env's ``joint_pos`` action on its way to the simulator.
+
+        It is placed last in ``make_env``'s ``Compose``: ``Compose._inv_call`` runs its transforms in
+        reverse, so last in the list is first to see an action. ``Transform.inv`` hands the env a shallow
+        copy, so what a collector stores stays the action the policy actually sampled.
+        """
 
         def __init__(self):
             super().__init__(in_keys=[], out_keys=[])
             self.mode = mode
             self._target = None    # the commanded joint target, integrated across steps (velocity mode)
-            self._reseed = None    # rows whose episode ended last step: their target is stale
+            self._reseed = None    # rows whose target is stale: their episode ended, or they were reset
+            self._ids = None       # arm joint indices: find_joints resolves names by regex, so cache them
+            self._scale = None
 
-        # -- the robot's own numbers, read from the simulator rather than configured twice ---------------
         def _robot(self):
             from pickplace.torchrl_env import _unwrapped
 
             env = _unwrapped(self.parent)
             robot = env.scene["robot"]
-            arm = env.cfg.arm
-            ids, _ = robot.find_joints(arm.arm_joint_names)
-            return env, robot, ids, float(arm.joint_action_scale)
+            if self._ids is None:
+                self._ids, _ = robot.find_joints(env.cfg.arm.arm_joint_names)
+                self._scale = float(env.cfg.arm.joint_action_scale)
+            return env, robot
 
-        def _limits(self, robot, ids):
-            if not clamp_to_limits:
-                return None
-            lim = robot.data.soft_joint_pos_limits.torch[:, ids, :]
-            return lim[..., 0], lim[..., 1]
+        def _mark_stale(self, rows: torch.Tensor) -> None:
+            self._reseed = rows if self._reseed is None else (self._reseed | rows)
 
         # -- actions travel "inverse" through transforms, from the policy towards the env ---------------
         def _inv_call(self, tensordict):
             action = tensordict.get("action")
-            env, robot, ids, scale = self._robot()
+            env, robot = self._robot()
             arm_cmd, gripper = action[..., :-1], action[..., -1:]
-            q_default = robot.data.default_joint_pos.torch[:, ids]
-            limits = self._limits(robot, ids)
+            q_default = robot.data.default_joint_pos.torch[:, self._ids]
+            lim = robot.data.soft_joint_pos_limits.torch[:, self._ids, :]
+            limits = (lim[..., 0], lim[..., 1])
 
             if self.mode == "joint_velocity":
-                q_measured = robot.data.joint_pos.torch[:, ids]
+                q_measured = robot.data.joint_pos.torch[:, self._ids]
                 if self._target is not None and self._reseed is not None and self._reseed.any():
-                    # an episode ended and the robot was teleported: those rows' targets describe the old
-                    # episode, so start them again from where the arm actually is
+                    # these rows' targets describe an episode that has ended or a row that was reset:
+                    # start them again from where the arm actually is now
                     self._target = torch.where(self._reseed.unsqueeze(-1), q_measured, self._target)
-                    self._reseed = None
-                self._target = integrate_velocity(arm_cmd, self._target, q_measured, env.step_dt,
-                                                  band=velocity_band, limits=limits)
-                native_arm = joint_target_to_native(self._target, q_default, scale, limits)
+                self._reseed = None
+                self._target = integrate_velocity(arm_cmd, self._target, q_measured, env.step_dt, limits)
+                native_arm = joint_target_to_native(self._target, q_default, self._scale, limits)
             else:  # joint_position
-                native_arm = joint_target_to_native(arm_cmd, q_default, scale, limits)
+                native_arm = joint_target_to_native(arm_cmd, q_default, self._scale, limits)
 
-            native_gripper = gripper_fraction_to_binary(gripper, gripper_closed_at, gripper_closed_is_high)
-            tensordict.set("action", torch.cat([native_arm, native_gripper], dim=-1))
+            tensordict.set("action", torch.cat([native_arm, gripper_fraction_to_binary(gripper)], dim=-1))
             return tensordict
 
         def _step(self, tensordict, next_tensordict):
+            # Under native auto-reset a done row is teleported inside step(), so its integrated target is
+            # stale. `done` here is the simulator's own: StepCounter runs with max_steps=None and cannot
+            # add one. Were that to change, re-derive this from the termination manager the way
+            # EpisodeOutcome does, or rows that were never physically reset would be re-seeded.
             done = next_tensordict.get("done")
-            self._reseed = done.reshape(done.shape[0], -1).any(-1)
+            self._mark_stale(done.reshape(done.shape[0], -1).any(-1))
             return next_tensordict
 
         def _reset(self, tensordict, tensordict_reset):
-            self._target = None  # re-seed from the measurement after the robot is teleported
+            # A reset may cover a subset of the sub-envs (the standard "_reset" mask, which IsaacLabWrapper
+            # supports), so only the masked rows are stale. Nulling every row here would throw away the
+            # integrated target of rows that were not reset at all.
+            mask = None if tensordict is None else tensordict.get("_reset", None)
+            if mask is None:
+                self._target, self._reseed = None, None
+            else:
+                self._mark_stale(mask.reshape(mask.shape[0], -1).any(-1))
             return tensordict_reset
 
         def transform_input_spec(self, input_spec):
-            """Advertise the adapted space: velocities in rad/s, or joint angles in rad, plus [0, 1] gripper."""
+            """Advertise the adapted space.
+
+            ``joint_velocity`` is unbounded throughout: the env declares no joint-velocity limits, and a
+            spec cannot bound the gripper dimension alone. ``joint_position`` bounds the arm to ±π — a sane
+            sampling range, not the robot's own limits, which ``_inv_call`` clamps to — and the gripper to
+            [0, 1]. The gripper is thresholded either way, so an out-of-range value cannot misbehave.
+            """
             spec = input_spec["full_action_spec", "action"]
-            n = spec.shape[-1]
             if self.mode == "joint_velocity":
                 adapted = Unbounded(shape=spec.shape, dtype=spec.dtype, device=spec.device)
             else:
@@ -174,27 +179,8 @@ def make_joint_action_adapter(mode: str, *, gripper_closed_at: float = 0.5, grip
                 high = torch.full(spec.shape, torch.pi, device=spec.device)
                 low[..., -1], high[..., -1] = 0.0, 1.0
                 adapted = Bounded(low=low, high=high, shape=spec.shape, dtype=spec.dtype, device=spec.device)
-            input_spec["full_action_spec"] = Composite(
-                action=adapted, shape=input_spec["full_action_spec"].shape, device=spec.device
-            )
-            self._action_dim = n
+            # assign the leaf rather than rebuilding the composite, which would drop any sibling key
+            input_spec["full_action_spec", "action"] = adapted
             return input_spec
 
     return JointActionAdapter()
-
-
-def describe(mode: str) -> str:
-    """One line per adapter, for logs and manifests."""
-    return {
-        "native": "the env's own action mode (ee_delta_pose or joint_pos), unchanged",
-        "joint_velocity": "7 joint velocities [rad/s] + gripper fraction [0, 1], integrated over one step",
-        "joint_position": "7 absolute joint angles [rad] + gripper fraction [0, 1]",
-    }[mode]
-
-
-def adapted_action_names(arm_joint_names: Sequence[str], mode: str) -> list[str]:
-    """Human-readable per-dimension names, for figures and debugging."""
-    if mode == "native":
-        return []
-    unit = "qd" if mode == "joint_velocity" else "q"
-    return [f"{unit}[{name}]" for name in arm_joint_names] + ["gripper"]

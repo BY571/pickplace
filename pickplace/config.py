@@ -1,12 +1,14 @@
 """Build a FoodCellEnvCfg from a plain mapping (e.g. the ``env:`` section of a Hydra config)."""
-
 from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping
 
+from pickplace.action_adapters import ADAPTERS
+
 ARMS = {"franka": "pickplace.arms.franka:FRANKA_CFG"}
 FOODS = {"rigid": "pickplace.food.rigid:RigidFoodCfg"}
+
 
 DEFAULT_ENV: dict = {
     "task": "FoodRobot-Cell-v0",
@@ -89,11 +91,24 @@ def build_cell_env_cfg(env_cfg: Mapping):
     if unknown:
         raise ValueError(f"Unknown env config keys {sorted(unknown)}. Allowed: {sorted(DEFAULT_ENV)}")
 
+    # Validated here rather than in make_env because action_adapter also decides stiff_arm below, i.e. it
+    # changes the robot asset: a script that builds a cfg directly must not get the stiff arm with no
+    # adapter and no error.
+    merged = {**DEFAULT_ENV, **env_cfg}
+    adapter, action_mode = merged["action_adapter"], merged["action_mode"]
+    if adapter not in ADAPTERS:
+        raise ValueError(f"Unknown action adapter {adapter!r}. Available: {list(ADAPTERS)}")
+    if adapter != "native" and action_mode != "joint_pos":
+        raise ValueError(
+            f"action_adapter={adapter!r} converts into the env's joint_pos action; set "
+            f"action_mode='joint_pos' (got {action_mode!r})."
+        )
+
     from pickplace.belt import BeltCfg
     from pickplace.envs.cell_env_cfg import FoodCellEnvCfg, scale_physx_buffers
     from pickplace.rewards import DENSE_TERMS, isaac_weight, resolve_reward_weights
 
-    c = {**DEFAULT_ENV, **env_cfg}
+    c = merged
     weights = resolve_reward_weights(c)
     arm = _resolve(ARMS, c["arm"], "arm")
     food_cls = _resolve(FOODS, c["food"], "food")
@@ -111,7 +126,7 @@ def build_cell_env_cfg(env_cfg: Mapping):
         food=food,
         belt=BeltCfg(**_geometry_kwargs(_tuples(c["belt"]))),
         action_mode=c["action_mode"],
-        # an adapter commands joint targets, which the plain gains track poorly (0.23 rad of droop)
+        # an adapter commands joint targets; the plain gains track those poorly (FoodCellEnvCfg.stiff_arm)
         stiff_arm=c["action_adapter"] != "native",
         cameras=bool(c["cameras"]),
         image_size=tuple(c["image_size"]),

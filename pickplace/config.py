@@ -14,6 +14,9 @@ DEFAULT_ENV: dict = {
     "arm": "franka",
     "food": "rigid",
     "action_mode": "ee_delta_pose",
+    # Action parameterization layered on top of action_mode by pickplace.action_adapters: "native" keeps the
+    # env's own space, "joint_velocity" / "joint_position" convert at the boundary (both need joint_pos mode).
+    "action_adapter": "native",
     "cameras": True,
     "image_size": [128, 128],
     "frame_stack": 1,
@@ -108,6 +111,8 @@ def build_cell_env_cfg(env_cfg: Mapping):
         food=food,
         belt=BeltCfg(**_geometry_kwargs(_tuples(c["belt"]))),
         action_mode=c["action_mode"],
+        # an adapter commands joint targets, which the plain gains track poorly (0.23 rad of droop)
+        stiff_arm=c["action_adapter"] != "native",
         cameras=bool(c["cameras"]),
         image_size=tuple(c["image_size"]),
         frame_stack=int(c["frame_stack"]),

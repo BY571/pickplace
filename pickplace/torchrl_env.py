@@ -169,7 +169,7 @@ def make_env(env_cfg: Mapping):
         # Last: Compose runs _inv_call in reverse, so the adapter is the first to see the action a policy
         # sampled in the adapted space and the last thing before the env gets its native one. Everything
         # above reads observations and rewards, which the adapter never touches.
-        transforms.append(make_joint_action_adapter(adapter))
+        transforms.append(make_joint_action_adapter(adapter, env_cfg.get("action_scale")))
     return TransformedEnv(base, Compose(*transforms))
 
 

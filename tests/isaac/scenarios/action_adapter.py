@@ -50,16 +50,19 @@ def hold_and_move():
 
     # a commanded velocity moves the joints in the commanded direction, by roughly v*dt per step
     env.reset()
+    from pickplace.action_adapters import DEFAULT_SCALES
+
+    unit = DEFAULT_SCALES["joint_velocity"]   # +-1 of the normalized command, in rad/s
     q_dot = torch.zeros(1, action_dim, device=env.device)
-    q_dot[0, 1] = 0.4  # rad/s on joint 2, well inside the DROID action range
-    q_dot[0, 3] = -0.3
+    q_dot[0, 1] = 0.4 / unit   # 0.4 rad/s on joint 2, well inside the Franka's 2.17 limit
+    q_dot[0, 3] = -0.3 / unit
     before = joints(env)
     steps = 20
     for _ in range(steps):
         td.set("action", q_dot.clone())
         _, td = env.step_and_maybe_reset(td)
     moved = (joints(env) - before)[0]
-    expected = (q_dot[0, :7] * dt * steps).cpu().numpy()
+    expected = (q_dot[0, :7] * unit * dt * steps).cpu().numpy()
     env.close()
     return {
         "dt": dt,
@@ -74,10 +77,18 @@ def hold_and_move():
 def position_adapter_reaches_a_commanded_pose():
     env = make_env({**BASE, "action_adapter": "joint_position"})
     td = env.reset()
+    from pickplace.action_adapters import DEFAULT_SCALES
+
+    u = env.base_env._env.unwrapped
+    ids, _ = u.scene["robot"].find_joints(u.cfg.arm.arm_joint_names)
+    default = u.scene["robot"].data.default_joint_pos.torch[:, ids]
     start = joints(env)
-    target = start.clone()
+    # a normalized command: this asks for the rest pose with joint 2 offset by 0.15 rad
+    cmd = (default - default) / DEFAULT_SCALES["joint_position"]
+    cmd[0, 1] += 0.15 / DEFAULT_SCALES["joint_position"]
+    target = default.clone()
     target[0, 1] += 0.15
-    action = torch.cat([target, torch.zeros(1, 1, device=env.device)], dim=-1)
+    action = torch.cat([cmd, torch.zeros(1, 1, device=env.device)], dim=-1)
     for _ in range(40):
         td.set("action", action.clone())
         _, td = env.step_and_maybe_reset(td)

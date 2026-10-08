@@ -22,11 +22,27 @@ from __future__ import annotations
 
 import torch
 
-ADAPTERS = ("native", "joint_velocity", "joint_position")
-"""``native`` leaves the env's own action space alone; the others are defined in this module."""
+ADAPTERS = ("native", "joint_velocity", "joint_delta", "joint_position")
+"""``native`` leaves the env's own action space alone; the others are defined in this module.
+
+``joint_velocity`` and ``joint_delta`` command the same quantity up to a factor of the control period, and
+differ in exactly one thing: what the command is relative to. ``joint_velocity`` integrates on its own
+commanded target, so it cannot be dragged around by a mistracking arm but accumulates whatever its own
+history accumulated; ``joint_delta`` re-anchors to the measured joints every step, so it cannot drift but
+inherits every tracking error. That is the axis the action-space ablation is built to measure.
+"""
 
 JOINT_ADAPTERS = ADAPTERS[1:]
 """The adapters this module implements. ``native`` is the absence of one, not a mode to build."""
+
+DEFAULT_SCALES = {
+    # +-1 of a policy's tanh-squashed action means this much. Anchored to the Franka's own limits: its
+    # joint velocity limits are 2.17 rad/s (joints 1-4) and 2.61 (5-7), so 2.0 rad/s is near-maximum
+    # authority and 0.04 rad per 50 Hz step is the same speed expressed as a displacement.
+    "joint_velocity": 2.0,    # rad/s
+    "joint_delta": 0.04,      # rad per control step == 2.0 rad/s at 50 Hz
+    "joint_position": 1.0,    # rad around the default pose
+}
 
 
 def joint_target_to_native(
@@ -82,12 +98,18 @@ def gripper_fraction_to_binary(fraction: torch.Tensor, closed_at: float = 0.5, c
     return torch.where(closed, -torch.ones_like(fraction), torch.ones_like(fraction))
 
 
-def make_joint_action_adapter(mode: str):
-    """Build the transform for ``mode`` (TorchRL is imported lazily, as elsewhere in this package)."""
+def make_joint_action_adapter(mode: str, scale: float | None = None):
+    """Build the transform for ``mode`` (TorchRL is imported lazily, as elsewhere in this package).
+
+    ``scale`` is what ±1 of a squashed policy action means in that space; ``None`` takes ``DEFAULT_SCALES``.
+    Every space needs its own: a unit action is a displacement in one and a speed in another, so sharing a
+    number across them would compare the scales rather than the spaces.
+    """
     if mode not in JOINT_ADAPTERS:
         raise ValueError(f"Unknown action adapter {mode!r}. Available: {list(JOINT_ADAPTERS)}")
+    scale = DEFAULT_SCALES[mode] if scale is None else float(scale)
 
-    from torchrl.data import Bounded, Unbounded
+    from torchrl.data import Bounded
     from torchrl.envs import Transform
 
     class JointActionAdapter(Transform):
@@ -101,10 +123,11 @@ def make_joint_action_adapter(mode: str):
         def __init__(self):
             super().__init__(in_keys=[], out_keys=[])
             self.mode = mode
+            self.scale = scale
             self._target = None    # the commanded joint target, integrated across steps (velocity mode)
             self._reseed = None    # rows whose target is stale: their episode ended, or they were reset
             self._ids = None       # arm joint indices: find_joints resolves names by regex, so cache them
-            self._scale = None
+            self._native_scale = None   # the env's own joint_pos scale, which this converts back into
 
         def _robot(self):
             from pickplace.torchrl_env import _unwrapped
@@ -113,17 +136,8 @@ def make_joint_action_adapter(mode: str):
             robot = env.scene["robot"]
             if self._ids is None:
                 self._ids, _ = robot.find_joints(env.cfg.arm.arm_joint_names)
-                self._scale = float(env.cfg.arm.joint_action_scale)
+                self._native_scale = float(env.cfg.arm.joint_action_scale)
             return env, robot
-
-        def _joint_limits(self):
-            """The arm's soft joint range, or None before the transform is attached to an env."""
-            try:
-                _, robot = self._robot()
-            except (AttributeError, KeyError, TypeError):
-                return None
-            lim = robot.data.soft_joint_pos_limits.torch[0, self._ids, :]
-            return lim[..., 0], lim[..., 1]
 
         def _mark_stale(self, rows: torch.Tensor) -> None:
             self._reseed = rows if self._reseed is None else (self._reseed | rows)
@@ -137,17 +151,22 @@ def make_joint_action_adapter(mode: str):
             lim = robot.data.soft_joint_pos_limits.torch[:, self._ids, :]
             limits = (lim[..., 0], lim[..., 1])
 
+            q_measured = robot.data.joint_pos.torch[:, self._ids]
             if self.mode == "joint_velocity":
-                q_measured = robot.data.joint_pos.torch[:, self._ids]
                 if self._target is not None and self._reseed is not None and self._reseed.any():
                     # these rows' targets describe an episode that has ended or a row that was reset:
                     # start them again from where the arm actually is now
                     self._target = torch.where(self._reseed.unsqueeze(-1), q_measured, self._target)
                 self._reseed = None
-                self._target = integrate_velocity(arm_cmd, self._target, q_measured, env.step_dt, limits)
-                native_arm = joint_target_to_native(self._target, q_default, self._scale, limits)
-            else:  # joint_position
-                native_arm = joint_target_to_native(arm_cmd, q_default, self._scale, limits)
+                self._target = integrate_velocity(arm_cmd * self.scale, self._target, q_measured,
+                                                  env.step_dt, limits)
+                q_target = self._target
+            elif self.mode == "joint_delta":
+                # anchored: every step starts again from where the arm actually is, so nothing integrates
+                q_target = q_measured + arm_cmd * self.scale
+            else:  # joint_position: an absolute pose, expressed around the rest pose so that 0 is "home"
+                q_target = q_default + arm_cmd * self.scale
+            native_arm = joint_target_to_native(q_target, q_default, self._native_scale, limits)
 
             tensordict.set("action", torch.cat([native_arm, gripper_fraction_to_binary(gripper)], dim=-1))
             return tensordict
@@ -177,23 +196,17 @@ def make_joint_action_adapter(mode: str):
         def transform_input_spec(self, input_spec):
             """Advertise the adapted space.
 
-            ``joint_velocity`` is unbounded throughout: the env declares no joint-velocity limits, and a
-            spec cannot bound the gripper dimension alone. ``joint_position`` advertises the robot's own
-            soft joint limits, so a policy does not spend distribution density on angles ``_inv_call``
-            would only clamp away; ±π stands in when the robot cannot be read (no parent yet). The gripper
-            is [0, 1] and thresholded either way, so an out-of-range value cannot misbehave.
+            Every adapted space takes a normalized command: the arm dimensions are [-1, 1] and ``scale``
+            says what that means physically (rad/s, rad per step, or rad around the rest pose), which is
+            what lets one policy architecture drive all of them and what makes a scale an experimental
+            variable rather than a hidden constant. The gripper is [0, 1] and thresholded, so a value
+            outside it cannot misbehave.
             """
             spec = input_spec["full_action_spec", "action"]
-            if self.mode == "joint_velocity":
-                adapted = Unbounded(shape=spec.shape, dtype=spec.dtype, device=spec.device)
-            else:
-                low = torch.full(spec.shape, -torch.pi, device=spec.device)
-                high = torch.full(spec.shape, torch.pi, device=spec.device)
-                joint_limits = self._joint_limits()
-                if joint_limits is not None:
-                    low[..., :-1], high[..., :-1] = joint_limits
-                low[..., -1], high[..., -1] = 0.0, 1.0
-                adapted = Bounded(low=low, high=high, shape=spec.shape, dtype=spec.dtype, device=spec.device)
+            low = torch.full(spec.shape, -1.0, device=spec.device)
+            high = torch.ones(spec.shape, device=spec.device)
+            low[..., -1] = 0.0
+            adapted = Bounded(low=low, high=high, shape=spec.shape, dtype=spec.dtype, device=spec.device)
             # assign the leaf rather than rebuilding the composite, which would drop any sibling key
             input_spec["full_action_spec", "action"] = adapted
             return input_spec

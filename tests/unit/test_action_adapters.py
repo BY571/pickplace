@@ -117,8 +117,13 @@ def test_each_adapter_builds_and_knows_its_mode(mode):
     assert A.make_joint_action_adapter(mode).mode == mode
 
 
-@pytest.mark.parametrize(("mode", "bounded"), [("joint_position", True), ("joint_velocity", False)])
-def test_the_advertised_action_spec_matches_the_documented_units(mode, bounded):
+@pytest.mark.parametrize("mode", A.JOINT_ADAPTERS)
+def test_every_adapted_space_advertises_a_normalized_command(mode):
+    """All adapters take [-1, 1] per arm dimension and [0, 1] for the gripper; `scale` carries the units.
+
+    That is what lets one policy architecture drive every space, and what makes the scale an experimental
+    variable rather than a constant buried in the arm config.
+    """
     from torchrl.data import Composite, Unbounded
 
     adapter = A.make_joint_action_adapter(mode)
@@ -130,12 +135,16 @@ def test_the_advertised_action_spec_matches_the_documented_units(mode, bounded):
     out = adapter.transform_input_spec(spec)
     action = out["full_action_spec", "action"]
     assert "other_key" in out.keys(), "rebuilding the composite would drop siblings"
-    if bounded:
-        assert action.space.low[0, -1] == 0.0 and action.space.high[0, -1] == 1.0  # gripper fraction
-        assert action.space.low[0, 0] < -3.1 and action.space.high[0, 0] > 3.1     # joints, about +-pi
-    else:
-        # TorchRL spells "unbounded" as the dtype's finite extremes rather than inf
-        assert action.space.low.max() < -1e30 and action.space.high.min() > 1e30
+    assert action.space.low[0, 0] == -1.0 and action.space.high[0, 0] == 1.0   # arm
+    assert action.space.low[0, -1] == 0.0 and action.space.high[0, -1] == 1.0  # gripper fraction
+
+
+def test_each_space_scales_a_unit_action_into_its_own_units():
+    """The defaults are anchored to the Franka: 2.17 rad/s joint limit, 0.02 s control period."""
+    assert A.DEFAULT_SCALES["joint_velocity"] == 2.0                      # rad/s, near the 2.17 limit
+    assert A.DEFAULT_SCALES["joint_delta"] * 50 == A.DEFAULT_SCALES["joint_velocity"]  # same speed at 50 Hz
+    assert A.make_joint_action_adapter("joint_delta", scale=0.01).scale == 0.01
+    assert A.make_joint_action_adapter("joint_delta").scale == A.DEFAULT_SCALES["joint_delta"]
 
 
 def test_the_default_env_keeps_todays_action_space():

@@ -142,11 +142,22 @@ simulation, so a policy that speaks another language can be run on exactly the e
 result in this repository was measured on. `pickplace/action_adapters.py` converts at the boundary, as the
 last transform in `make_env`.
 
-| `action_adapter` | Arm action | Gripper | Needs |
+| `action_adapter` | ±1 of the arm command means | Relative to | Needs |
 |---|---|---|---|
-| `native` (default) | whatever `action_mode` says | as above | — |
-| `joint_velocity` | 7 joint velocities [rad/s], integrated one control period into a target | fraction in [0, 1], thresholded | `action_mode=joint_pos` |
-| `joint_position` | 7 absolute joint angles [rad] | fraction in [0, 1], thresholded | `action_mode=joint_pos` |
+| `native` (default) | whatever `action_mode` says | — | — |
+| `joint_velocity` | 2.0 rad/s, integrated one control period | its own previous command | `action_mode=joint_pos` |
+| `joint_delta` | 0.04 rad of motion (= 2.0 rad/s at 50 Hz) | the measured joints | `action_mode=joint_pos` |
+| `joint_position` | 1.0 rad of offset | the robot's rest pose | `action_mode=joint_pos` |
+
+Every adapted space takes a normalized [−1, 1] command per arm dimension and [0, 1] for the gripper, with
+`env.action_scale` carrying the units (defaults in `action_adapters.DEFAULT_SCALES`, anchored to the
+Franka's own 2.17 rad/s joint limit). One policy architecture therefore drives all of them, and the scale
+is an experimental variable rather than a constant hidden in `ArmCfg`.
+
+`joint_velocity` and `joint_delta` command the same quantity at the same speed and differ in exactly one
+thing: what it is relative to. Velocity integrates on its own commanded target, so a mistracking arm cannot
+drag it around but its own history accumulates; delta re-anchors to the measurement every step, so it
+cannot drift but inherits every tracking error.
 
 The conversion is exact rather than fitted: `joint_pos` applies `target = default + scale · action`, so
 commanding a target is `action = (target − default) / scale`, and targets are clamped into the robot's soft

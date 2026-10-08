@@ -19,6 +19,13 @@ DEFAULT_ENV: dict = {
     # Action parameterization layered on top of action_mode by pickplace.action_adapters: "native" keeps the
     # env's own space, "joint_velocity" / "joint_position" convert at the boundary (both need joint_pos mode).
     "action_adapter": "native",
+    # What +-1 of a squashed policy action means: m/rad for ee_delta_pose, rad around the rest pose for
+    # joint_pos, and the adapter's own unit (see action_adapters.DEFAULT_SCALES) when one is active.
+    # None keeps the arm's own default, which is what every result before the action-space ablation used.
+    "action_scale": None,
+    # Use the arm's high-PD asset in joint_pos mode. None: on whenever an adapter is active, since an
+    # adapter commands joint targets. Set explicitly to compare action spaces at equal controller gains.
+    "stiff_arm": None,
     "cameras": True,
     "image_size": [128, 128],
     "frame_stack": 1,
@@ -111,6 +118,13 @@ def build_cell_env_cfg(env_cfg: Mapping):
     c = merged
     weights = resolve_reward_weights(c)
     arm = _resolve(ARMS, c["arm"], "arm")
+    if c["action_scale"] is not None and adapter == "native":
+        # Only for the env's own action modes. With an adapter active the arm's scale is the internal
+        # constant the adapter converts back through, and action_scale configures the adapter instead --
+        # applying it to both would cancel out and leave the native action a factor of 1/scale too large.
+        # ArmCfg instances are module-level singletons; replace() keeps the shared one untouched.
+        field = "ik_action_scale" if action_mode == "ee_delta_pose" else "joint_action_scale"
+        arm = arm.replace(**{field: float(c["action_scale"])})
     food_cls = _resolve(FOODS, c["food"], "food")
     food = food_cls(**_tuples(c["food_params"]))
 
@@ -126,8 +140,7 @@ def build_cell_env_cfg(env_cfg: Mapping):
         food=food,
         belt=BeltCfg(**_geometry_kwargs(_tuples(c["belt"]))),
         action_mode=c["action_mode"],
-        # an adapter commands joint targets; the plain gains track those poorly (FoodCellEnvCfg.stiff_arm)
-        stiff_arm=c["action_adapter"] != "native",
+        stiff_arm=(c["action_adapter"] != "native") if c["stiff_arm"] is None else bool(c["stiff_arm"]),
         cameras=bool(c["cameras"]),
         image_size=tuple(c["image_size"]),
         frame_stack=int(c["frame_stack"]),
